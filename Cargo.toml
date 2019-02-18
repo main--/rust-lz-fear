@@ -6,8 +6,11 @@ edition = "2018"
 
 description = "Pure Rust implementation of LZ4 compression and decompression as a library"
 keywords = ["compression", "lz4", "compress", "decompression", "decompress"]
-categories = [ "", "", "", "", "" ]
+categories = [ "algorithms", "compression", "encoding" ]
 license = "MIT"
+readme = "README.md"
+
+repository = "https://github.com/johannesvollmer/lz4-compression-rs"
 
 [dependencies]
 byteorder = "1.3.1"
