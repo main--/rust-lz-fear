@@ -71,6 +71,7 @@ impl<'a> Encoder<'a> {
         for _ in 0..steps {
             // Insert the cursor position into the dictionary.
             self.insert_cursor();
+
             // Increment the cursor.
             self.cur += 1;
         }
@@ -143,6 +144,7 @@ impl<'a> Encoder<'a> {
         if candidate != !0
             && self.get_batch(candidate) == self.get_batch_at_cursor()
             && self.cur - candidate <= 0xFFFF {
+
             // Calculate the "extension bytes", i.e. the duplicate bytes beyond the batch. These
             // are the number of prefix bytes shared between the match and needle.
             let ext = self.input[self.cur + 4..]
@@ -269,8 +271,8 @@ impl<'a> Encoder<'a> {
 /// Compress all bytes of `input` into `output`.
 pub fn compress_into(input: &[u8], output: &mut Vec<u8>) {
     Encoder {
-        input: input,
-        output: output,
+        input,
+        output,
         cur: 0,
         dict: [!0; DICTIONARY_SIZE],
     }.complete();

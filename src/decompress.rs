@@ -39,9 +39,11 @@ impl<'a> Decoder<'a> {
         if input.len() < n {
             // No extra bytes. This is clearly not expected, so we return an error.
             Err(Error::UnexpectedEnd)
-        } else {
+        }
+        else {
             // Take the first n bytes.
             let res = Ok(&input[..n]);
+
             // Shift the stream to left, so that it is no longer the first byte.
             *input = &input[n..];
 
@@ -97,6 +99,7 @@ impl<'a> Decoder<'a> {
     fn read_integer(&mut self) -> Result<usize, Error> {
         // We start at zero and count upwards.
         let mut n = 0;
+
         // If this byte takes value 255 (the maximum value it can take), another byte is read
         // and added to the sum. This repeats until a byte lower than 255 is read.
         while {
@@ -131,6 +134,7 @@ impl<'a> Decoder<'a> {
     fn read_literal_section(&mut self) -> Result<(), Error> {
         // The higher token is the literals part of the token. It takes a value from 0 to 15.
         let mut literal = (self.token >> 4) as usize;
+
         // If the initial value is 15, it is indicated that another byte will be read and added to
         // it.
         if literal == 15 {
@@ -190,7 +194,8 @@ impl<'a> Decoder<'a> {
             self.duplicate(start, match_length);
 
             Ok(())
-        } else {
+        }
+        else {
             Err(Error::InvalidDeduplicationOffset)
         }
     }
@@ -242,8 +247,8 @@ impl<'a> Decoder<'a> {
 pub fn decompress_into(input: &[u8], output: &mut Vec<u8>) -> Result<(), Error> {
     // Decode into our vector.
     Decoder {
-        input: input,
-        output: output,
+        input,
+        output,
         token: 0,
     }.complete()?;
 
