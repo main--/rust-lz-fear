@@ -1,6 +1,6 @@
 [package]
 name = "lz4-compression"
-version = "0.1.0"
+version = "0.6.0"
 authors = ["johannesvollmer <johannes.boenki@t-online.de>, ticki <Ticki@users.noreply.github.com>"]
 edition = "2018"
 
