@@ -220,7 +220,8 @@ impl<'a> Encoder<'a> {
             let mut token = if block.lit_len < 0xF {
                 // Since we can fit the literals length into it, there is no need for saturation.
                 (block.lit_len as u8) << 4
-            } else {
+            }
+            else {
                 // We were unable to fit the literals into it, so we saturate to 0xF. We will later
                 // write the extensional value through LSIC encoding.
                 0xF0
@@ -231,7 +232,8 @@ impl<'a> Encoder<'a> {
             token |= if dup_extra_len < 0xF {
                 // We could fit it in.
                 dup_extra_len as u8
-            } else {
+            }
+            else {
                 // We were unable to fit it in, so we default to 0xF, which will later be extended
                 // by LSIC encoding.
                 0xF
