@@ -75,9 +75,47 @@ impl<'a> Decoder<'a> {
     fn duplicate(&mut self, start: usize, match_length: usize) {
         // We cannot simply use memcpy or `extend_from_slice`, because these do not allow
         // self-referential copies: http://ticki.github.io/img/lz4_runs_encoding_diagram.svg
-        for i in start..start + match_length {
-            let b = self.output[i];
-            self.output.push(b);
+
+        let oldlen = self.output.len();
+        match oldlen - start {
+            0 => unreachable!(),
+
+            1 => self.output.resize(oldlen + match_length, self.output[oldlen - 1]), // fastpath: use memset if we repeat the same byte forever
+
+            delta if match_length <= delta => {
+                // fastpath: nonoverlapping
+
+                // for borrowck reasons we have to extend with zeroes first and then memcpy
+                // instead of simply using extend_from_slice
+                self.output.resize(oldlen + match_length, 0);
+                let (head, tail) = self.output.split_at_mut(oldlen);
+                tail.copy_from_slice(&head[start..][..match_length]);
+            }
+            i@2 | i@4 | i@8 => {
+                // fastpath: overlapping but small
+
+                // speedup: build 16 byte buffer so we can handle 16 bytes each iteration instead of one
+                let delta = i;
+                let mut buf = [0u8; 16];
+                for chunk in buf.chunks_mut(delta) {
+                    // if this panics (i.e. chunklen != delta), delta does not divide 16 (but it always does)
+                    chunk.copy_from_slice(&self.output[start..][..delta]);
+                }
+                // fill with zero bytes
+                self.output.resize(oldlen + match_length, 0);
+                // copy buf as often as possible
+                for target in self.output[oldlen..].chunks_mut(buf.len()) {
+                    target.copy_from_slice(&buf[..target.len()]);
+                }
+            }
+            _ => {
+                // slowest path: copy single bytes
+                self.output.reserve(match_length);
+                for i in start..start + match_length {
+                    let b = self.output[i];
+                    self.output.push(b);
+                }
+            }
         }
     }
 
@@ -200,6 +238,9 @@ impl<'a> Decoder<'a> {
         }
     }
 
+
+
+
     /// Complete the decompression by reading all the blocks.
     ///
     /// # Decompressing a block
@@ -237,6 +278,9 @@ impl<'a> Decoder<'a> {
 
             // Now, we read the duplicates section.
             self.read_duplicate_section()?;
+
+//self.output.clear();
+
         }
 
         Ok(())

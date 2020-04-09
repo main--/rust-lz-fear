@@ -1,10 +1,19 @@
 use lz4_compression::prelude::{ decompress, compress };
+use rand::prelude::*;
+use std::time::Instant;
 
 fn main(){
-    let uncompressed_data: &[u8] = b"Hello world, what's up?";
+    let mut data = vec![0u8; 10_000_000];
+//    thread_rng().fill(data.as_mut_slice());
 
-    let compressed_data = compress(uncompressed_data);
-    let decompressed_data = decompress(&compressed_data).unwrap();
+    let uncompressed_data: &[u8] = data.as_slice();
+        let compressed_data = compress(uncompressed_data);
 
-    assert_eq!(uncompressed_data, decompressed_data.as_slice());
+    let pre = Instant::now();
+    for _ in 0..100 {
+        let decompressed_data = decompress(&compressed_data).unwrap();
+        assert_eq!(uncompressed_data, decompressed_data.as_slice());
+    }
+    let duration = pre.elapsed();
+    println!("{:?}", duration);
 }
