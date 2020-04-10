@@ -148,8 +148,8 @@ impl<R: Read> LZ4FrameReader<R> {
     pub fn frame_size(&self) -> Option<u64> { self.content_size }
     pub fn dictionary_id(&self) -> Option<u32> { self.dictionary_id }
 
-    pub fn decode_block(&mut self, output: &mut [u8]) -> usize {
-        let mut writer = Cursor::new(output);
+    pub fn decode_block(&mut self, output: &mut Vec<u8>) {
+        assert!(output.is_empty());
 
         let reader = &mut self.reader;
 
@@ -159,7 +159,7 @@ impl<R: Read> LZ4FrameReader<R> {
                 let checksum = reader.read_u32::<LE>().unwrap();
                 assert_eq!(hasher.finish(), checksum.into());
             }
-            return 0;
+            return;
         }
 
         let is_compressed = block_length & 0x80_00_00_00 == 0;
@@ -177,33 +177,36 @@ impl<R: Read> LZ4FrameReader<R> {
 
         if is_compressed {
             if let Some(window) = self.carryover_window.as_mut() {
-                let mut vec = window.clone();
-                decompress::decompress_into(&buf, &mut vec).unwrap();
-                writer.write(&vec[window.len()..]).unwrap();
+//                let mut vec = Vec::with_capacity(self.bd.block_maxsize());
+                decompress::decompress_block(&buf, &window, output).unwrap();
+//                decompress::decompress_into(&buf, &mut vec).unwrap();
 
-                window.clear();
-                window.extend_from_slice(&vec[std::cmp::max(vec.len(), WINDOW_SIZE) - WINDOW_SIZE..]);
+                let outlen = output.len();
+                if outlen < WINDOW_SIZE {
+                    // remove as many bytes from front as we are replacing
+                    window.drain(..outlen);
+                    window.extend_from_slice(&output);
+                } else {
+                    window.clear();
+                    window.extend_from_slice(&output[outlen - WINDOW_SIZE..]);
+                }
 
                 assert!(window.len() <= WINDOW_SIZE);
 println!("dependently compressed {} {}", window.capacity(), window.len());
             } else {
-                writer.write(&decompress::decompress(&buf).unwrap()).unwrap();
+                decompress::decompress_block(&buf, &[], output).unwrap();
 println!("independently compressed");
             }
         } else {
-            writer.write(&buf).unwrap();
+            output.extend_from_slice(&buf);
 println!("uncompressed");
         }
 
-        let totallen: usize = writer.position().try_into().unwrap();
-
-        assert!(totallen <= self.bd.block_maxsize());
+        assert!(output.len() <= self.bd.block_maxsize());
 
         if let Some(hasher) = self.content_hasher.as_mut() {
-            hasher.write(&writer.get_mut()[..totallen]);
+            hasher.write(&output);
         }
-
-        totallen
     }
 }
 
@@ -213,11 +216,13 @@ pub fn decompress_file<R: Read>(reader: R) -> Vec<u8> {
 
     let mut plaintext = Vec::new();
 
+    let mut buf = Vec::with_capacity(reader.block_size());
     loop {
-        let mut buf = vec![0u8; reader.block_size()];
-        let len = reader.decode_block(buf.as_mut_slice());
+        reader.decode_block(&mut buf);
+        let len = buf.len();
         if len == 0 { break; }
         plaintext.extend_from_slice(&buf[..len]);
+        buf.clear();
     }
 
     plaintext
