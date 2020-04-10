@@ -308,13 +308,28 @@ pub fn decompress2(input: &[u8], prefix: &[u8], output: &mut Vec<u8>) -> Result<
 
 	// read literals
 	let literal_length = read_lsic(token >> 4, &mut reader) as usize;
-	let output_pos_pre_literal = output.len();
 
-	output.extend_from_slice(&input[reader.position() as usize..][..literal_length]);
-	reader.set_position(reader.position() + (literal_length as u64));
+	let output_pos_pre_literal = output.len();
+	output.resize(output_pos_pre_literal + literal_length, 0);
+	if let Err(_) = reader.read_exact(&mut output[output_pos_pre_literal..]) {
+	    return Err(Error::UnexpectedEnd);
+	}
+
+	// read duplicates
+	let offset = match reader.read_u16::<LE>() { Ok(x) => x, _ => break, } as usize;
+	let match_len = 4 + read_lsic(token & 0xf, &mut reader) as usize;
+	copy_overlapping(offset, match_len, prefix, output)?;
+    }
+    Ok(())
+}
+
+//	output.extend_from_slice(&input[reader.position() as usize..][..literal_length]);
+//	reader.set_position(reader.position() + (literal_length as u64));
+
 //	output.reserve(literal_length);
 //	reader.by_ref().take(literal_length as u64).read_to_end(output).unwrap();
 	/*
+	let output_pos_pre_literal = output.len();
 	output.resize(output_pos_pre_literal + literal_length, 0);
 	if let Err(_) = reader.read_exact(&mut output[output_pos_pre_literal..]) {*/
 /*	if output.len() - output_pos_pre_literal != literal_length {
@@ -323,14 +338,27 @@ pub fn decompress2(input: &[u8], prefix: &[u8], output: &mut Vec<u8>) -> Result<
 
 	// TODO if empty ok
 
-	// read duplicates
-	let offset = match reader.read_u16::<LE>() { Ok(x) => x, _ => break, } as usize;
-	let match_len = 4 + read_lsic(token & 0xf, &mut reader) as usize;
-	let old_len = output.len();
+
+fn copy_overlapping(offset: usize, match_len: usize, prefix: &[u8], output: &mut Vec<u8>) -> Result<(), Error> {
+let old_len = output.len();
 	//println!("lit {} dup {}", literal_length, match_len);
 	match offset {
 	    0 => unreachable!("invalid offset"),
-	    i if i > old_len => return Err(Error::InvalidDeduplicationOffset), //unreachable!("also invalid offset (or missing prefix/dict)"),
+//	    i if i > (old_len + prefix.len()) => return Err(Error::InvalidDeduplicationOffset), //unreachable!("also invalid offset (or missing prefix/dict)"),
+	    i if i > old_len => {
+	        // need prefix for this
+	        let prefix_needed = i - old_len;
+	        if prefix_needed > prefix.len() {
+	            return Err(Error::InvalidDeduplicationOffset); //unreachable!("also invalid offset (or missing prefix/dict)"),
+	        }
+	        let how_many_bytes_from_prefix = std::cmp::min(prefix_needed, match_len);
+	        output.extend_from_slice(&prefix[prefix.len()-prefix_needed..][..how_many_bytes_from_prefix]);
+	        let remaining_len = match_len - how_many_bytes_from_prefix;
+	        if remaining_len != 0 {
+	            // offset stays the same because our curser moved forward by the amount of bytes we took from prefix
+	            return copy_overlapping(offset, remaining_len, &[], output);
+	        }
+	    }
 
 	    // fastpath: memset if we repeat the same byte forever
 	    1 => output.resize(old_len + match_len, output[old_len - 1]),
@@ -370,8 +398,7 @@ println!("feelsbadman");
                 }
             }
 	}
-    }
-    Ok(())
+	Ok(())
 }
 
 /// Decompress all bytes of `input` into `output`.

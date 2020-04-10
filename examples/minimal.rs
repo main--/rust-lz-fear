@@ -5,7 +5,7 @@ use std::time::Instant;
 
 fn main(){
     let mut data = vec![0u8; 10_000_000];
-    thread_rng().fill(data.as_mut_slice());
+    thread_rng().fill(&mut data[2_000_000..6_000_000]); // mixed
 
     let uncompressed_data: &[u8] = data.as_slice();
     let compressed_data = compress(uncompressed_data);
