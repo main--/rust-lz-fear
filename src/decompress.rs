@@ -287,6 +287,93 @@ impl<'a> Decoder<'a> {
     }
 }
 
+fn read_lsic(initial: u8, cursor: &mut Cursor<&[u8]>) -> u64 {
+    let mut value = initial as u64;
+    if value == 15 {
+	loop {
+	    let more = cursor.read_u8().unwrap();
+	    value += more as u64;
+	    if more != 0xff { break; }
+	}
+    }
+    value
+}
+
+use std::io::{Cursor, Read};
+use byteorder::{LE, ReadBytesExt};
+pub fn decompress2(input: &[u8], prefix: &[u8], output: &mut Vec<u8>) -> Result<(), Error> {
+    let mut reader = Cursor::new(input);
+    loop {
+	let token = match reader.read_u8() { Ok(x) => x, _ => break, };
+
+	// read literals
+	let literal_length = read_lsic(token >> 4, &mut reader) as usize;
+	let output_pos_pre_literal = output.len();
+
+	output.extend_from_slice(&input[reader.position() as usize..][..literal_length]);
+	reader.set_position(reader.position() + (literal_length as u64));
+//	output.reserve(literal_length);
+//	reader.by_ref().take(literal_length as u64).read_to_end(output).unwrap();
+	/*
+	output.resize(output_pos_pre_literal + literal_length, 0);
+	if let Err(_) = reader.read_exact(&mut output[output_pos_pre_literal..]) {*/
+/*	if output.len() - output_pos_pre_literal != literal_length {
+	    return Err(Error::UnexpectedEnd);
+	}*/
+
+	// TODO if empty ok
+
+	// read duplicates
+	let offset = match reader.read_u16::<LE>() { Ok(x) => x, _ => break, } as usize;
+	let match_len = 4 + read_lsic(token & 0xf, &mut reader) as usize;
+	let old_len = output.len();
+	//println!("lit {} dup {}", literal_length, match_len);
+	match offset {
+	    0 => unreachable!("invalid offset"),
+	    i if i > old_len => return Err(Error::InvalidDeduplicationOffset), //unreachable!("also invalid offset (or missing prefix/dict)"),
+
+	    // fastpath: memset if we repeat the same byte forever
+	    1 => output.resize(old_len + match_len, output[old_len - 1]),
+
+	    o if match_len <= o => {
+		// fastpath: nonoverlapping
+                // for borrowck reasons we have to extend with zeroes first and then memcpy
+                // instead of simply using extend_from_slice
+                output.resize(old_len + match_len, 0);
+                let (head, tail) = output.split_at_mut(old_len);
+                tail.copy_from_slice(&head[old_len-offset..][..match_len]);
+	    }
+	    2 | 4 | 8 => {
+println!("smooth");
+                // fastpath: overlapping but small
+
+                // speedup: build 16 byte buffer so we can handle 16 bytes each iteration instead of one
+                let mut buf = [0u8; 16];
+                for chunk in buf.chunks_mut(offset) {
+                    // if this panics (i.e. chunklen != delta), delta does not divide 16 (but it always does)
+                    chunk.copy_from_slice(&output[old_len-offset..][..offset]);
+                }
+                // fill with zero bytes
+                output.resize(old_len + match_len, 0);
+                // copy buf as often as possible
+                for target in output[old_len..].chunks_mut(buf.len()) {
+                    target.copy_from_slice(&buf[..target.len()]);
+                }
+	    }
+            _ => {
+println!("feelsbadman");
+                // slowest path: copy single bytes
+                output.reserve(match_len);
+                for i in 0..match_len {
+                    let b = output[old_len - offset + i];
+                    output.push(b);
+                }
+            }
+	}
+    }
+    Ok(())
+}
+
 /// Decompress all bytes of `input` into `output`.
 pub fn decompress_into(input: &[u8], output: &mut Vec<u8>) -> Result<(), Error> {
     // Decode into our vector.
@@ -300,11 +387,20 @@ pub fn decompress_into(input: &[u8], output: &mut Vec<u8>) -> Result<(), Error> 
 }
 
 /// Decompress all bytes of `input`.
-pub fn decompress(input: &[u8]) -> Result<Vec<u8>, Error> {
+pub fn decompress3(input: &[u8]) -> Result<Vec<u8>, Error> {
     // Allocate a vector to contain the decompressed stream.
     let mut vec = Vec::with_capacity(4096);
 
     decompress_into(input, &mut vec)?;
+
+    Ok(vec)
+}
+/// Decompress all bytes of `input`.
+pub fn decompress(input: &[u8]) -> Result<Vec<u8>, Error> {
+    // Allocate a vector to contain the decompressed stream.
+    let mut vec = Vec::with_capacity(4096);
+
+    decompress2(input, &[], &mut vec)?;
 
     Ok(vec)
 }

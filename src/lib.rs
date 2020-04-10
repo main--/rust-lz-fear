@@ -20,6 +20,39 @@ use std::convert::TryInto;
 use twox_hash::XxHash32;
 
 
+/*
+use std::ops::Index;
+trait Sliceable: Index<usize> {
+    fn len(&self) -> usize;
+}
+impl Sliceable for [u8] {
+    fn len(&self) -> usize { self.len() }
+}
+use std::marker::PhantomData;
+struct SliceConcat<T, L, R> {
+    t: PhantomData<T>,
+    left: L,
+    right: R,
+}
+impl<T, L: AsRef<Sliceable<Output=T>>, R: AsRef<Sliceable<Output=T>>> Index<usize> for SliceConcat<T, L, R> {
+    type Output = T;
+
+    fn index(&self, i: usize) -> &Self::Output {
+        let offset = self.left.as_ref().len();
+        if i < offset {
+            &self.left.as_ref()[i]
+        } else {
+            &self.right.as_ref()[i - offset]
+        }
+    }
+}
+impl<T, L: AsRef<Sliceable<Output=T>>, R: AsRef<Sliceable<Output=T>>> Sliceable for SliceConcat<T, L, R> {
+    fn len(&self) -> usize { self.left.as_ref().len() + self.right.as_ref().len() }
+}
+*/
+
+
+
 const WINDOW_SIZE: usize = 64 * 1024;
 
 
