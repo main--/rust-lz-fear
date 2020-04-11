@@ -12,10 +12,10 @@ fn main() -> io::Result<()> {
 
     let mut lz4_reader = LZ4FrameReader::new(file_in)?.into_read();
     loop {
-    	let buf = lz4_reader.fill_buf()?;
-    	if buf.is_empty() { break; }
-    	let consumed = file_out.write(buf)?;
-    	drop(buf);
+        let buf = lz4_reader.fill_buf()?;
+        if buf.is_empty() { break; }
+        let consumed = file_out.write(buf)?;
+        drop(buf);
         lz4_reader.consume(consumed);
     }
 

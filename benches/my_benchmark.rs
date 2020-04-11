@@ -1,5 +1,7 @@
-use lz4_compression::prelude::{decompress, compress};
+//use lz4_compression::prelude::{decompress, compress};
 //use lz4_compression::decompress::decompress3;
+use lz4_compression::decompress::decompress;
+use lz4_compression::compress::compress;
 use lz4_compression::decompress_file;
 use rand::prelude::*;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};

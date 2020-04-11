@@ -28,7 +28,7 @@ fn read_lsic(initial: u8, cursor: &mut Cursor<&[u8]>) -> usize {
     if value == 0xF {
         loop {
             let more = cursor.read_u8()?;
-            value += more as usize;
+            value += usize::from(more);
             if more != 0xff {
                 break;
             }
@@ -49,26 +49,19 @@ fn read_lsic(initial: u8, cursor: &mut Cursor<&[u8]>) -> usize {
 #[throws]
 pub fn decompress_block(input: &[u8], prefix: &[u8], output: &mut Vec<u8>) {
     let mut reader = Cursor::new(input);
-    loop {
-        let token = match reader.read_u8() {
-            Ok(x) => x,
-            _ => break,
-        };
-
+    while let Ok(token) = reader.read_u8() {
         // read literals
-        let literal_length = read_lsic(token >> 4, &mut reader)? as usize;
+        let literal_length = read_lsic(token >> 4, &mut reader)?;
 
         let output_pos_pre_literal = output.len();
         output.resize(output_pos_pre_literal + literal_length, 0);
         reader.read_exact(&mut output[output_pos_pre_literal..])?;
 
         // read duplicates
-        let offset = match reader.read_u16::<LE>() {
-            Ok(x) => x,
-            _ => break,
-        } as usize;
-        let match_len = 4 + read_lsic(token & 0xf, &mut reader)? as usize;
-        copy_overlapping(offset, match_len, prefix, output)?;
+        if let Ok(offset) = reader.read_u16::<LE>() {
+            let match_len = 4 + read_lsic(token & 0xf, &mut reader)?;
+            copy_overlapping(offset.into(), match_len, prefix, output)?;
+        }
     }
 }
 

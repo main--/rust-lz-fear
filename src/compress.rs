@@ -10,7 +10,7 @@ use byteorder::{NativeEndian, ByteOrder};
 ///
 /// Every four bytes is assigned an entry. When this number is lower, fewer entries exists, and
 /// thus collisions are more likely, hurting the compression ratio.
-const DICTIONARY_SIZE: usize = 4096;
+const DICTIONARY_SIZE: usize = 16 * 1024; //4096;
 
 
 /// A LZ4 block.
@@ -98,6 +98,9 @@ impl<'a> Encoder<'a> {
     ///
     /// This is guaranteed to be below `DICTIONARY_SIZE`.
     fn get_cur_hash(&self) -> usize {
+        let v = self.get_batch_at_cursor();
+        return (v.wrapping_mul(2654435761) as usize) % DICTIONARY_SIZE;
+        /*
         // Use PCG transform to generate a relatively good hash of the four bytes batch at the
         // cursor.
         let mut x = self.get_batch_at_cursor().wrapping_mul(0xa4d94a4f);
@@ -107,6 +110,7 @@ impl<'a> Encoder<'a> {
         x = x.wrapping_mul(0xa4d94a4f);
 
         x as usize % DICTIONARY_SIZE
+        */
     }
 
     /// Read a 4-byte "batch" from some position.
@@ -272,12 +276,12 @@ impl<'a> Encoder<'a> {
 
 /// Compress all bytes of `input` into `output`.
 pub fn compress_into(input: &[u8], output: &mut Vec<u8>) {
-    Encoder {
+    Box::new(Encoder {
         input,
         output,
         cur: 0,
         dict: [!0; DICTIONARY_SIZE],
-    }.complete();
+    }).complete();
 }
 
 /// Compress all bytes of `input`.
