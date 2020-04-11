@@ -15,7 +15,7 @@ pub mod prelude {
 
 use byteorder::{LE, ReadBytesExt};
 use std::hash::Hasher;
-use std::io::{Read, Write, Result as IoResult, Cursor};
+use std::io::{Read, BufRead, Result as IoResult};
 use std::convert::TryInto;
 use twox_hash::XxHash32;
 
@@ -89,15 +89,46 @@ impl BlockDescriptor {
     }
 }
 
+pub struct LZ4FrameIoReader<R: Read> {
+    frame_reader: LZ4FrameReader<R>,
+    bytes_taken: usize,
+    buffer: Vec<u8>,
+}
+impl<R: Read> Read for LZ4FrameIoReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
+        let mybuf = self.fill_buf()?;
+        let bytes_to_take = std::cmp::min(mybuf.len(), buf.len());
+        &mut buf[..bytes_to_take].copy_from_slice(&mybuf[..bytes_to_take]);
+        self.consume(bytes_to_take);
+        Ok(bytes_to_take)
+    }
+}
+impl<R: Read> BufRead for LZ4FrameIoReader<R> {
+    fn fill_buf(&mut self) -> IoResult<&[u8]> {
+        if self.bytes_taken == self.buffer.len() {
+            self.buffer.clear();
+            self.frame_reader.decode_block(&mut self.buffer);
+            self.bytes_taken = 0;
+        }
+        Ok(&self.buffer[self.bytes_taken..])
+    }
+
+    fn consume(&mut self, amt: usize) {
+        self.bytes_taken += amt;
+        assert!(self.bytes_taken <= self.buffer.len());
+    }
+}
 
 pub struct LZ4FrameReader<R: Read> {
     reader: R,
     flags: Flags,
     bd: BlockDescriptor,
+    read_buf: Vec<u8>,
     content_size: Option<u64>,
     dictionary_id: Option<u32>,
     content_hasher: Option<XxHash32>,
     carryover_window: Option<Vec<u8>>,
+    finished: bool,
 }
 
 impl<R: Read> LZ4FrameReader<R> {
@@ -119,7 +150,7 @@ impl<R: Read> LZ4FrameReader<R> {
         } else {
             None
         };
-        println!("csiz = {:?}", content_size);
+//        println!("csiz = {:?}", content_size);
         let dictionary_id = if flags.dictionary_id() {
             let i = reader.read_u32::<LE>().unwrap();
             hasher.write_u32(i);
@@ -131,7 +162,7 @@ impl<R: Read> LZ4FrameReader<R> {
         let hc = reader.read_u8().unwrap();
         assert_eq!(hc, (hasher.finish() >> 8) as u8);
         let content_hasher = if flags.content_checksum() {
-            Some(XxHash32::with_seed(0))
+            None //Some(XxHash32::with_seed(0))
         } else {
             None
         };
@@ -141,15 +172,25 @@ impl<R: Read> LZ4FrameReader<R> {
         } else {
             Some(Vec::with_capacity(WINDOW_SIZE))
         };
-        Ok(LZ4FrameReader { reader, flags, bd, content_size, dictionary_id, content_hasher, carryover_window })
+        Ok(LZ4FrameReader { reader, flags, bd, content_size, dictionary_id, content_hasher, carryover_window, finished: false, read_buf: Vec::new() })
     }
 
     pub fn block_size(&self) -> usize { self.bd.block_maxsize() }
     pub fn frame_size(&self) -> Option<u64> { self.content_size }
     pub fn dictionary_id(&self) -> Option<u32> { self.dictionary_id }
+    
+    pub fn into_read(self) -> LZ4FrameIoReader<R> {
+        LZ4FrameIoReader {
+            buffer: Vec::with_capacity(self.block_size()),
+            bytes_taken: 0,
+            frame_reader: self,
+        }
+    }
 
     pub fn decode_block(&mut self, output: &mut Vec<u8>) {
         assert!(output.is_empty());
+        
+        if self.finished { return; }
 
         let reader = &mut self.reader;
 
@@ -159,13 +200,16 @@ impl<R: Read> LZ4FrameReader<R> {
                 let checksum = reader.read_u32::<LE>().unwrap();
                 assert_eq!(hasher.finish(), checksum.into());
             }
+            self.finished = true;
             return;
         }
 
         let is_compressed = block_length & 0x80_00_00_00 == 0;
         let block_length = block_length & 0x7f_ff_ff_ff;
 
-        let mut buf = vec![0u8; block_length.try_into().unwrap()];
+        let mut buf = &mut self.read_buf;
+        buf.resize(block_length.try_into().unwrap(), 0);
+        //let mut buf = vec![0u8; block_length.try_into().unwrap()];
         reader.read_exact(buf.as_mut_slice()).unwrap();
 
         if self.flags.block_checksums() {
@@ -192,14 +236,14 @@ impl<R: Read> LZ4FrameReader<R> {
                 }
 
                 assert!(window.len() <= WINDOW_SIZE);
-println!("dependently compressed {} {}", window.capacity(), window.len());
+//println!("dependently compressed {} {}", window.capacity(), window.len());
             } else {
                 decompress::decompress_block(&buf, &[], output).unwrap();
-println!("independently compressed");
+//println!("independently compressed");
             }
         } else {
             output.extend_from_slice(&buf);
-println!("uncompressed");
+//println!("uncompressed");
         }
 
         assert!(output.len() <= self.bd.block_maxsize());
