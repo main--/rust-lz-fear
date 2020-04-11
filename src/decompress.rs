@@ -1,13 +1,16 @@
 use byteorder::{ReadBytesExt, LE};
 use std::io::{Cursor, Read};
+use thiserror::Error;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Error)]
 pub enum Error {
     /// Expected more bytes, but found none.
     /// Either your input was truncated or you're trying to decompress garbage.
+    #[error("block stream ended prematurely")]
     UnexpectedEnd,
     /// The offset for a deduplication is out of bounds.
     /// This may be caused by a missing or incomplete dictionary.
+    #[error("deduplication offset is out of bounds")]
     InvalidDeduplicationOffset,
 }
 

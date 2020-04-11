@@ -1,5 +1,5 @@
-use lz4_compression::prelude::{ decompress, compress };
-use lz4_compression::decompress::decompress3;
+use lz4_compression::compress::compress;
+use lz4_compression::decompress::decompress;
 use rand::prelude::*;
 use std::time::Instant;
 
@@ -20,6 +20,7 @@ fn main(){
 	println!("{:?}", duration);
     }
 
+/*
     {
 	let pre = Instant::now();
 	for _ in 0..100 {
@@ -29,4 +30,5 @@ fn main(){
 	let duration = pre.elapsed();
 	println!("{:?}", duration);
     }
+*/
 }
