@@ -14,7 +14,7 @@ fn main(){
 	let pre = Instant::now();
 	for _ in 0..100 {
             let decompressed_data = decompress(&compressed_data).unwrap();
-//            assert_eq!(uncompressed_data, decompressed_data.as_slice());
+            assert_eq!(uncompressed_data, decompressed_data.as_slice());
 	}
 	let duration = pre.elapsed();
 	println!("{:?}", duration);

@@ -6,6 +6,6 @@ fn main(){
 //    assert!(decompress_file(Cursor::new(include_bytes!("../random.bin.lz4") as &[u8])).iter().eq(include_bytes!("../random.bin").iter()));
 //    assert!(decompress_file(Cursor::new(include_bytes!("../sh.lz4") as &[u8])).iter().eq(include_bytes!("/usr/bin/cargo").iter()));
  for _ in 0..100 {
-  decompress_file(Cursor::new(include_bytes!("../sh.lz4") as &[u8]));
+  decompress_file(Cursor::new(include_bytes!("../sh.lz4") as &[u8])).unwrap();
  }
 }

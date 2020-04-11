@@ -1,27 +1,34 @@
 use byteorder::{ReadBytesExt, LE};
-use std::io::{Cursor, Read};
+use std::io::{self, Cursor, Read, ErrorKind};
 use thiserror::Error;
+use fehler::{throws};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Error)]
 pub enum Error {
-    /// Expected more bytes, but found none.
-    /// Either your input was truncated or you're trying to decompress garbage.
-    #[error("block stream ended prematurely")]
+    #[error("Block stream ended prematurely. Either your input was truncated or you're trying to decompress garbage.")]
     UnexpectedEnd,
-    /// The offset for a deduplication is out of bounds.
-    /// This may be caused by a missing or incomplete dictionary.
-    #[error("deduplication offset is out of bounds")]
+    #[error("The offset for a deduplication is zero. This is always invalid. You are probably decoding corrupted input.")]
+    ZeroDeduplicationOffset,
+    #[error("The offset for a deduplication is out of bounds. This may be caused by a missing or incomplete dictionary.")]
     InvalidDeduplicationOffset,
+}
+impl From<io::Error> for Error {
+    fn from(e: io::Error) -> Error {
+        // this is the only kind of IO error that can happen in this code as we are always reading from slices
+        assert_eq!(e.kind(), ErrorKind::UnexpectedEof);
+        Error::UnexpectedEnd
+    }
 }
 
 /// This is how LZ4 encodes varints.
 /// Just keep reading and adding while it's all F
-fn read_lsic(initial: u8, cursor: &mut Cursor<&[u8]>) -> u64 {
-    let mut value = initial as u64;
+#[throws]
+fn read_lsic(initial: u8, cursor: &mut Cursor<&[u8]>) -> usize {
+    let mut value: usize = initial.into();
     if value == 0xF {
         loop {
-            let more = cursor.read_u8().unwrap();
-            value += more as u64;
+            let more = cursor.read_u8()?;
+            value += more as usize;
             if more != 0xff {
                 break;
             }
@@ -39,7 +46,8 @@ fn read_lsic(initial: u8, cursor: &mut Cursor<&[u8]>) -> u64 {
 ///
 /// This function is based around memory buffers because that's what LZ4 intends.
 /// If your blocks don't fit in your memory, you should use smaller blocks.
-pub fn decompress_block(input: &[u8], prefix: &[u8], output: &mut Vec<u8>) -> Result<(), Error> {
+#[throws]
+pub fn decompress_block(input: &[u8], prefix: &[u8], output: &mut Vec<u8>) {
     let mut reader = Cursor::new(input);
     loop {
         let token = match reader.read_u8() {
@@ -48,34 +56,26 @@ pub fn decompress_block(input: &[u8], prefix: &[u8], output: &mut Vec<u8>) -> Re
         };
 
         // read literals
-        let literal_length = read_lsic(token >> 4, &mut reader) as usize;
+        let literal_length = read_lsic(token >> 4, &mut reader)? as usize;
 
         let output_pos_pre_literal = output.len();
         output.resize(output_pos_pre_literal + literal_length, 0);
-        if let Err(_) = reader.read_exact(&mut output[output_pos_pre_literal..]) {
-            return Err(Error::UnexpectedEnd);
-        }
+        reader.read_exact(&mut output[output_pos_pre_literal..])?;
 
         // read duplicates
         let offset = match reader.read_u16::<LE>() {
             Ok(x) => x,
             _ => break,
         } as usize;
-        let match_len = 4 + read_lsic(token & 0xf, &mut reader) as usize;
+        let match_len = 4 + read_lsic(token & 0xf, &mut reader)? as usize;
         copy_overlapping(offset, match_len, prefix, output)?;
     }
-    Ok(())
 }
 
-fn copy_overlapping(
-    offset: usize,
-    match_len: usize,
-    prefix: &[u8],
-    output: &mut Vec<u8>,
-) -> Result<(), Error> {
+fn copy_overlapping(offset: usize, match_len: usize, prefix: &[u8], output: &mut Vec<u8>) -> Result<(), Error> {
     let old_len = output.len();
     match offset {
-        0 => unreachable!("invalid offset"),
+        0 => return Err(Error::ZeroDeduplicationOffset),
         i if i > old_len => {
             // need prefix for this
             let prefix_needed = i - old_len;
