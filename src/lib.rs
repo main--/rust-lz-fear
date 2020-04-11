@@ -150,7 +150,7 @@ impl<R: Read> LZ4FrameReader<R> {
         } else {
             None
         };
-//        println!("csiz = {:?}", content_size);
+
         let dictionary_id = if flags.dictionary_id() {
             let i = reader.read_u32::<LE>().unwrap();
             hasher.write_u32(i);
@@ -162,7 +162,7 @@ impl<R: Read> LZ4FrameReader<R> {
         let hc = reader.read_u8().unwrap();
         assert_eq!(hc, (hasher.finish() >> 8) as u8);
         let content_hasher = if flags.content_checksum() {
-            None //Some(XxHash32::with_seed(0))
+            Some(XxHash32::with_seed(0))
         } else {
             None
         };
@@ -207,9 +207,8 @@ impl<R: Read> LZ4FrameReader<R> {
         let is_compressed = block_length & 0x80_00_00_00 == 0;
         let block_length = block_length & 0x7f_ff_ff_ff;
 
-        let mut buf = &mut self.read_buf;
+        let buf = &mut self.read_buf;
         buf.resize(block_length.try_into().unwrap(), 0);
-        //let mut buf = vec![0u8; block_length.try_into().unwrap()];
         reader.read_exact(buf.as_mut_slice()).unwrap();
 
         if self.flags.block_checksums() {
@@ -221,9 +220,7 @@ impl<R: Read> LZ4FrameReader<R> {
 
         if is_compressed {
             if let Some(window) = self.carryover_window.as_mut() {
-//                let mut vec = Vec::with_capacity(self.bd.block_maxsize());
                 decompress::decompress_block(&buf, &window, output).unwrap();
-//                decompress::decompress_into(&buf, &mut vec).unwrap();
 
                 let outlen = output.len();
                 if outlen < WINDOW_SIZE {
@@ -236,14 +233,11 @@ impl<R: Read> LZ4FrameReader<R> {
                 }
 
                 assert!(window.len() <= WINDOW_SIZE);
-//println!("dependently compressed {} {}", window.capacity(), window.len());
             } else {
                 decompress::decompress_block(&buf, &[], output).unwrap();
-//println!("independently compressed");
             }
         } else {
             output.extend_from_slice(&buf);
-//println!("uncompressed");
         }
 
         assert!(output.len() <= self.bd.block_maxsize());
