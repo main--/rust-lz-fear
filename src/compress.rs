@@ -5,7 +5,7 @@
 //! memory hungry.
 
 use std::io::Read;
-use byteorder::{ReadBytesExt, LE};
+use byteorder::{ByteOrder, NativeEndian, ReadBytesExt, LE};
 
 /// Duplication dictionary size.
 ///
@@ -59,7 +59,7 @@ pub struct Encoder<'a> {
     ///
     /// Every four bytes are hashed, and in the resulting slot their position in the input buffer
     /// is placed. This way we can easily look up a candidate to back references.
-    dict: [usize; DICTIONARY_SIZE],
+    dict: [u32; DICTIONARY_SIZE],
 }
 
 impl<'a> Encoder<'a> {
@@ -68,9 +68,9 @@ impl<'a> Encoder<'a> {
     /// This will update the cursor and dictionary to reflect the now processed bytes.
     ///
     /// This returns `false` if all the input bytes are processed.
-    fn go_forward(&mut self, mut steps: usize) -> bool {
-        if steps > 1 {
-        println!("bigstep operationelle semantik");
+    fn go_forward(&mut self, mut steps: usize, egal: bool) -> bool {
+        //if steps > 1 {
+        if egal {
             assert!(steps >= 2);
             self.insert_cursor();
             
@@ -85,7 +85,8 @@ impl<'a> Encoder<'a> {
             self.cur += i;
             return self.cur <= self.input.len();
         }
-    
+
+/*
         // Go over all the bytes we are skipping and update the cursor and dictionary.
         for _ in 0..steps {
             // Insert the cursor position into the dictionary.
@@ -94,6 +95,9 @@ impl<'a> Encoder<'a> {
             // Increment the cursor.
             self.cur += 1;
         }
+*/
+	self.insert_cursor();
+	self.cur += steps;
 
         // Return `true` if there's more to read.
         self.cur <= self.input.len()
@@ -105,9 +109,9 @@ impl<'a> Encoder<'a> {
         if self.remaining_batch() {
             // Insert the cursor into the table.
             
-            println!("inserting@{:04} {:016x}", self.cur, self.get_batch_at_cursor().swap_bytes());
+//            println!("inserting@{:04} {:016x}", self.cur, self.get_batch_at_cursor().swap_bytes());
             
-            self.dict[self.get_cur_hash()] = self.cur;
+            self.dict[self.get_cur_hash()] = self.cur as u32;
         }
     }
 
@@ -128,14 +132,16 @@ impl<'a> Encoder<'a> {
     ///
     /// This will read a native-endian 4-byte integer from some position.
     fn get_batch(&self, n: usize) -> u64 {
-        debug_assert!(self.remaining_batch(), "Reading a partial batch.");
+        assert!(self.remaining_batch(), "Reading a partial batch.");
 
 	//let xo = if (n + 8) <= self.input.len() { NativeEndian::read_u32(&self.input[n+4..]) as u64 } else { 0 };
 	//let xo = if (n + 5) <= self.input.len() { self.input[n+4] as u32 } else { 0 };
-	let zeroes: &[u8] = &[0; 4];
-	(&self.input[n..]).chain(zeroes).read_u64::<LE>().unwrap()
-//	(&self.input[n..]).chain(zeroes).read_u32::<LE>().unwrap() as u64
-        //NativeEndian::read_u64(&self.input[n..])
+	//let zeroes: &[u8] = &[0; 4];
+	//(&self.input[n..]).chain(zeroes).read_u64::<LE>().unwrap()
+	//(&self.input[n..]).chain(zeroes).read_u32::<LE>().unwrap() as u64
+	
+	let upper_byte = self.input.get(n+4).copied().unwrap_or(0);
+        NativeEndian::read_u32(&self.input[n..]) as u64 | ((upper_byte as u64) << 32)
     }
 
     /// Read the batch at the cursor.
@@ -153,7 +159,7 @@ impl<'a> Encoder<'a> {
         }
 
         // Find a candidate in the dictionary by hashing the current four bytes.
-        let candidate = self.dict[self.get_cur_hash()];
+        let candidate = self.dict[self.get_cur_hash()] as usize;
 
         // Three requirements to the candidate exists:
         // - The candidate is not the trap value (0xFFFFFFFF), which represents an empty bucket.
@@ -161,17 +167,45 @@ impl<'a> Encoder<'a> {
         //   candidate actually matches what we search for.
         // - We can address up to 16-bit offset, hence we are only able to address the candidate if
         //   its offset is less than or equals to 0xFFFF.
-        if candidate != !0
+        if self.cur != 0 //candidate != !0
             && (self.get_batch(candidate) as u32) == (self.get_batch_at_cursor() as u32)
             && self.cur - candidate <= 0xFFFF {
 
             // Calculate the "extension bytes", i.e. the duplicate bytes beyond the batch. These
             // are the number of prefix bytes shared between the match and needle.
+            /*
             let ext = self.input[self.cur + 4..]
                 .iter()
                 .zip(&self.input[candidate + 4..])
                 .take_while(|&(a, b)| a == b)
                 .count();
+                */
+                
+                
+                //
+            let mut ext = 0;
+//            for (a, b) in self.input[self.cur+4..].chunks_exact(4).zip(self.input[candidate+4..].chunks_exact(4)) {
+            for (a, b) in self.input[self.cur+4..].chunks(4).zip(self.input[candidate+4..].chunks(4)) {
+                if a.len() != 4 || b.len() != 4 {
+                    // slow path
+                    ext += a.iter().zip(b).take_while(|&(a, b)| a == b).count();
+                    break;
+                }
+
+//                println!("{:?} vs {:?}", a, b);
+                let a = NativeEndian::read_u32(a);
+                let b = NativeEndian::read_u32(b);
+                let xor = a ^ b;
+                if xor == 0 {
+                    ext += 4;
+//                    println!("4ext={}", ext);
+                } else {
+                // FIXME depends on endianness?
+                    ext += xor.trailing_zeros() as usize / 8;
+//                    println!("next={} by {:x}", ext, xor);
+                    break;
+                }
+            }
 
             Some(Duplicate {
                 offset: (self.cur - candidate) as u16,
@@ -194,6 +228,11 @@ impl<'a> Encoder<'a> {
 
     /// Read the block of the top of the stream.
     fn pop_block(&mut self) -> Block {
+        let LZ4_skipTrigger = 6;
+    let mut searchMatchNb = /*acceleration*/1 << LZ4_skipTrigger;
+    let mut step = 1;
+    
+    
         // The length of the literals section.
         let mut lit = 0;
 
@@ -208,7 +247,7 @@ impl<'a> Encoder<'a> {
                 if (dup.offset as usize + backtrack) == 0xffff { break; }
                 if backtrack == lit { break; }
                 if (self.cur - dup.offset as usize - backtrack) <= 1 { break; }
-                println!("ext {} vs {}", self.input[(self.cur - dup.offset as usize) - 1 - backtrack], self.input[self.cur - 1 - backtrack]);
+//                println!("ext {} vs {}", self.input[(self.cur - dup.offset as usize) - 1 - backtrack], self.input[self.cur - 1 - backtrack]);
                 if self.input[(self.cur - dup.offset as usize) - 1 - backtrack] != self.input[self.cur - 1 - backtrack] { break; }
                 backtrack += 1;
 //                println!("updated to {} {}", self.cur - candidate, ext);
@@ -217,7 +256,7 @@ impl<'a> Encoder<'a> {
 
                 // Move forward. Note that `ext` is actually the steps minus 4, because of the
                 // minimum matchlenght, so we need to add 4.
-                self.go_forward(dup.extra_bytes + 4 /*- backtrack*/);
+                self.go_forward(dup.extra_bytes + 4 /*- backtrack*/, true);
                 dup.extra_bytes += backtrack;
                 //dup.offset += backtrack as u16;
 
@@ -228,7 +267,7 @@ impl<'a> Encoder<'a> {
             }
 
             // Try to move forward.
-            if !self.go_forward(1) {
+            if !self.go_forward(step, false) {
                 // We reached the end of the stream, and no duplicates section follows.
                 return Block {
                     lit_len: lit,
@@ -237,7 +276,10 @@ impl<'a> Encoder<'a> {
             }
 
             // No duplicates found yet, so extend the literals section.
-            lit += 1;
+            lit += step;
+            
+            step = searchMatchNb >> LZ4_skipTrigger;
+            searchMatchNb += 1;
         }
     }
 
@@ -250,7 +292,7 @@ impl<'a> Encoder<'a> {
 
             // Read the next block into two sections, the literals and the duplicates.
             let block = self.pop_block();
-            println!("{:?}", block);
+//            println!("{:?}", block);
 
             // Generate the higher half of the token.
             let mut token = if block.lit_len < 0xF {
@@ -312,7 +354,8 @@ pub fn compress_into(input: &[u8], output: &mut Vec<u8>) {
         input,
         output,
         cur: 0,
-        dict: [!0; DICTIONARY_SIZE],
+//        dict: [!0; DICTIONARY_SIZE],
+        dict: [0; DICTIONARY_SIZE],
     }.complete();
 }
 
