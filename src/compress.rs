@@ -186,8 +186,9 @@ impl<'a> Encoder<'a> {
             let mut ext = 0;
 //            for (a, b) in self.input[self.cur+4..].chunks_exact(4).zip(self.input[candidate+4..].chunks_exact(4)) {
             for (a, b) in self.input[self.cur+4..].chunks(4).zip(self.input[candidate+4..].chunks(4)) {
-                if a.len() != 4 || b.len() != 4 {
-                    // slow path
+                // as the candidate is always behind our cursor, a is always smaller
+                if a.len() != 4 || /*b.len() != 4*/ {
+                    // slow path, can't read full integers
                     ext += a.iter().zip(b).take_while(|&(a, b)| a == b).count();
                     break;
                 }
