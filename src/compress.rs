@@ -4,13 +4,15 @@
 //! high performance. It has fixed memory usage, which contrary to other approachs, makes it less
 //! memory hungry.
 
-use byteorder::{NativeEndian, ByteOrder};
+use std::io::Read;
+use byteorder::{ReadBytesExt, LE};
 
 /// Duplication dictionary size.
 ///
 /// Every four bytes is assigned an entry. When this number is lower, fewer entries exists, and
 /// thus collisions are more likely, hurting the compression ratio.
-const DICTIONARY_SIZE: usize = 16 * 1024; //4096;
+const DICTIONARY_SIZE: usize = 1 << HASHLOG;
+const HASHLOG: usize = 12;
 
 
 /// A LZ4 block.
@@ -99,31 +101,24 @@ impl<'a> Encoder<'a> {
     /// This is guaranteed to be below `DICTIONARY_SIZE`.
     fn get_cur_hash(&self) -> usize {
         let v = self.get_batch_at_cursor();
-        return (v.wrapping_mul(2654435761) as usize) % DICTIONARY_SIZE;
-        /*
-        // Use PCG transform to generate a relatively good hash of the four bytes batch at the
-        // cursor.
-        let mut x = self.get_batch_at_cursor().wrapping_mul(0xa4d94a4f);
-        let a = x >> 16;
-        let b = x >> 30;
-        x ^= a >> b;
-        x = x.wrapping_mul(0xa4d94a4f);
-
-        x as usize % DICTIONARY_SIZE
-        */
+        ((v << 24).wrapping_mul(889523592379) as usize) >> (64 - HASHLOG)
     }
 
     /// Read a 4-byte "batch" from some position.
     ///
     /// This will read a native-endian 4-byte integer from some position.
-    fn get_batch(&self, n: usize) -> u32 {
+    fn get_batch(&self, n: usize) -> u64 {
         debug_assert!(self.remaining_batch(), "Reading a partial batch.");
 
-        NativeEndian::read_u32(&self.input[n..])
+	//let xo = if (n + 8) <= self.input.len() { NativeEndian::read_u32(&self.input[n+4..]) as u64 } else { 0 };
+	//let xo = if (n + 5) <= self.input.len() { self.input[n+4] as u32 } else { 0 };
+	let zeroes: &[u8] = &[0; 4];
+	(&self.input[n..]).chain(zeroes).read_u64::<LE>().unwrap()
+        //NativeEndian::read_u64(&self.input[n..])
     }
 
     /// Read the batch at the cursor.
-    fn get_batch_at_cursor(&self) -> u32 {
+    fn get_batch_at_cursor(&self) -> u64 {
         self.get_batch(self.cur)
     }
 
@@ -146,7 +141,7 @@ impl<'a> Encoder<'a> {
         // - We can address up to 16-bit offset, hence we are only able to address the candidate if
         //   its offset is less than or equals to 0xFFFF.
         if candidate != !0
-            && self.get_batch(candidate) == self.get_batch_at_cursor()
+            && (self.get_batch(candidate) as u32) == (self.get_batch_at_cursor() as u32)
             && self.cur - candidate <= 0xFFFF {
 
             // Calculate the "extension bytes", i.e. the duplicate bytes beyond the batch. These
@@ -276,12 +271,12 @@ impl<'a> Encoder<'a> {
 
 /// Compress all bytes of `input` into `output`.
 pub fn compress_into(input: &[u8], output: &mut Vec<u8>) {
-    Box::new(Encoder {
+    Encoder {
         input,
         output,
         cur: 0,
         dict: [!0; DICTIONARY_SIZE],
-    }).complete();
+    }.complete();
 }
 
 /// Compress all bytes of `input`.
