@@ -68,7 +68,24 @@ impl<'a> Encoder<'a> {
     /// This will update the cursor and dictionary to reflect the now processed bytes.
     ///
     /// This returns `false` if all the input bytes are processed.
-    fn go_forward(&mut self, steps: usize) -> bool {
+    fn go_forward(&mut self, mut steps: usize) -> bool {
+        if steps > 1 {
+        println!("bigstep operationelle semantik");
+            assert!(steps >= 2);
+            self.insert_cursor();
+            
+            let i = 2;
+            self.cur += steps - i;
+            steps = i;
+
+//            self.cur += steps - 1;
+//            steps = 1;
+            
+            self.insert_cursor();
+            self.cur += i;
+            return self.cur <= self.input.len();
+        }
+    
         // Go over all the bytes we are skipping and update the cursor and dictionary.
         for _ in 0..steps {
             // Insert the cursor position into the dictionary.
@@ -87,6 +104,9 @@ impl<'a> Encoder<'a> {
         // Make sure that there is at least one batch remaining.
         if self.remaining_batch() {
             // Insert the cursor into the table.
+            
+            println!("inserting@{:04} {:016x}", self.cur, self.get_batch_at_cursor().swap_bytes());
+            
             self.dict[self.get_cur_hash()] = self.cur;
         }
     }
@@ -114,6 +134,7 @@ impl<'a> Encoder<'a> {
 	//let xo = if (n + 5) <= self.input.len() { self.input[n+4] as u32 } else { 0 };
 	let zeroes: &[u8] = &[0; 4];
 	(&self.input[n..]).chain(zeroes).read_u64::<LE>().unwrap()
+//	(&self.input[n..]).chain(zeroes).read_u32::<LE>().unwrap() as u64
         //NativeEndian::read_u64(&self.input[n..])
     }
 
@@ -178,15 +199,30 @@ impl<'a> Encoder<'a> {
 
         loop {
             // Search for a duplicate.
-            if let Some(dup) = self.find_duplicate() {
+            if let Some(mut dup) = self.find_duplicate() {
                 // We found a duplicate, so the literals section is over...
+
+            // backtrack
+            let mut backtrack = 0;
+            loop {
+                if (dup.offset as usize + backtrack) == 0xffff { break; }
+                if backtrack == lit { break; }
+                if (self.cur - dup.offset as usize - backtrack) <= 1 { break; }
+                println!("ext {} vs {}", self.input[(self.cur - dup.offset as usize) - 1 - backtrack], self.input[self.cur - 1 - backtrack]);
+                if self.input[(self.cur - dup.offset as usize) - 1 - backtrack] != self.input[self.cur - 1 - backtrack] { break; }
+                backtrack += 1;
+//                println!("updated to {} {}", self.cur - candidate, ext);
+            }
+
 
                 // Move forward. Note that `ext` is actually the steps minus 4, because of the
                 // minimum matchlenght, so we need to add 4.
-                self.go_forward(dup.extra_bytes + 4);
+                self.go_forward(dup.extra_bytes + 4 /*- backtrack*/);
+                dup.extra_bytes += backtrack;
+                //dup.offset += backtrack as u16;
 
                 return Block {
-                    lit_len: lit,
+                    lit_len: lit - backtrack,
                     dup: Some(dup),
                 };
             }
@@ -214,6 +250,7 @@ impl<'a> Encoder<'a> {
 
             // Read the next block into two sections, the literals and the duplicates.
             let block = self.pop_block();
+            println!("{:?}", block);
 
             // Generate the higher half of the token.
             let mut token = if block.lit_len < 0xF {
