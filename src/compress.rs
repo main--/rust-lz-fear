@@ -446,6 +446,9 @@ pub fn compress2<W: Write, T: EncoderTable>(input: &[u8], mut writer: W) {
     while cursor < input.len() {
         let literal_start = cursor;
         
+        let LZ4_skipTrigger = 6;
+        let mut searchMatchNb = /*acceleration*/1 << LZ4_skipTrigger;
+        let mut step = 1;
         // look for a duplicate
         let duplicate = loop {
             if (input.len() - cursor) < 4 {
@@ -474,38 +477,35 @@ pub fn compress2<W: Write, T: EncoderTable>(input: &[u8], mut writer: W) {
                     // if it wasn't, this was just a hash collision :(
                     let offset = (cursor - candidate) as u16;
 
-        // backtrack
-        let max_backtrack = cmp::min(cursor - literal_start, (u16::MAX - offset) as usize);
-        let backtrack = input[..cursor].iter().rev().zip(input[..candidate].iter().rev()).take(max_backtrack).take_while(|&(a, b)| a == b).count();
-        // offset remains unchanged
-        //cursor -= backtrack;
-        extra_bytes += backtrack;
+                    // backtrack
+                    let max_backtrack = cmp::min(cursor - literal_start, (u16::MAX - offset) as usize);
+                    let backtrack = input[..cursor].iter().rev().zip(input[..candidate].iter().rev()).take(max_backtrack).take_while(|&(a, b)| a == b).count();
+                    // offset remains unchanged
+                    extra_bytes += backtrack;
 
-        cursor += matching_bytes;
-        println!("{} of {}", cursor, input.len());
-        
-        let minus_two = &input[cursor-2..];
-        if minus_two.len() >= 4 {
-        table.set(minus_two, cursor-2);
-        }
-//        table.set(&input[cursor..], cursor);
+                    cursor += matching_bytes;
+
+                    // not sure why exactly this, but that's what they do
+                    let minus_two = &input[cursor-2..];
+                    if minus_two.len() >= 4 {
+                        table.set(minus_two, cursor-2);
+                    }
         
                     break Duplicate { offset, extra_bytes };
                 }
             }
             
             // no match, keep looping
-//            println!("inserting@{:04} {:?}", cursor,  &current_batch[..8]);
-
-//            table.set(current_batch, cursor);
-            cursor += 1;
+            cursor += step;
+            step = searchMatchNb >> LZ4_skipTrigger;
+            searchMatchNb += 1;
         };
         
         // cursor is now pointing past the match
         let literal_end = cursor - duplicate.extra_bytes - MINMATCH;
         let literal_len = literal_end - literal_start;
         
-            println!("loopy {} {:?}", literal_len, duplicate);
+//        println!("loopy {} {:?}", literal_len, duplicate);
         
         let mut token = 0;
         write_lsic_head(&mut token, 4, literal_len);
