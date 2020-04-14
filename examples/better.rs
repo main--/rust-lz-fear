@@ -55,7 +55,7 @@ fn main() -> io::Result<()> {
     let mut buff = vec![0u8; 5 * 1024 * 1024];
     let source = buf.as_slice();
     for chunk in source.chunks(4*1024*1024) {
-        compress2::<U32Table>(chunk, buff.as_mut_slice());
+        compress2::<_, U32Table>(chunk, TrustMeThisIsEnoughBuffer(buff.as_mut_slice()))?;
 //        file_out.write_u32::<LE>(compressed2.len() as u32)?;
         file_out.write_all(&buff)?;
     }
