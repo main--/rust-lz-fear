@@ -149,8 +149,10 @@ pub fn compress2<W: Write, T: EncoderTable>(input: &[u8], mut writer: W) {
         let mut step = 1;
         // look for a duplicate
         let duplicate = loop {
-            if (input.len() - cursor) < 4 {
+            if (input.len() - cursor) < 13 {
                 // end with a literal-only section
+                // the limit of 13 bytes is somewhat arbitrarily chosen by the spec (our decoder doesn't need it)
+                // probably to allow some insane decoder optimization they do in C
                 let literal_len = input.len() - literal_start;
                 
                 let mut token = 0;
@@ -160,8 +162,11 @@ pub fn compress2<W: Write, T: EncoderTable>(input: &[u8], mut writer: W) {
                 writer.write_all(&input[literal_start..][..literal_len])?;
                 return;
             }
-        
-            let current_batch = &input[cursor..];
+
+            // due to the check above we know there's at least 13 bytes of space
+            // we have to chop off the last five bytes though because the spec also (completely arbitrarily, I must say)
+            // requires these to be encoded as literals (once again, our decoder does not require this)
+            let current_batch = &input[cursor..(input.len() - 5)];
             let candidate = table.get(current_batch);
             table.set(current_batch, cursor);
 
@@ -180,18 +185,7 @@ pub fn compress2<W: Write, T: EncoderTable>(input: &[u8], mut writer: W) {
                     let backtrack = input[..cursor].iter().rev().zip(input[..candidate].iter().rev()).take(max_backtrack).take_while(|&(a, b)| a == b).count();
                     // offset remains unchanged
                     extra_bytes += backtrack;
-                    
-//                    if backtrack > 0 {
-//                    table.set(&input[cursor-backtrack-1..], cursor-backtrack-1);
-//                    }
-
                     cursor += matching_bytes;
-
-/*
-        let literal_end = cursor - extra_bytes - MINMATCH;
-        let literal_len = literal_end - literal_start;
-        println!("lz4.c: start={} literals={} offset={} dup={} hash={} table={} ", literal_start, literal_len, offset, matching_bytes + backtrack, hash5(&input[literal_end..]), table.get(&input[literal_end..]));
-*/
 
                     // not sure why exactly this, but that's what they do
                     let minus_two = &input[cursor-2..];
@@ -207,10 +201,10 @@ pub fn compress2<W: Write, T: EncoderTable>(input: &[u8], mut writer: W) {
             cursor += step;
             step = searchMatchNb >> LZ4_skipTrigger;
 
-// the first byte of each iteration doesn't count due to some weird-ass manual loop unrolling in the C code
-if literal_start+1 != cursor {
-searchMatchNb += 1
-}
+            // the first byte of each iteration doesn't count due to some weird-ass manual loop unrolling in the C code
+            if literal_start+1 != cursor {
+                searchMatchNb += 1
+            }
         };
         
         // cursor is now pointing past the match
