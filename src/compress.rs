@@ -4,10 +4,11 @@
 //! high performance. It has fixed memory usage, which contrary to other approachs, makes it less
 //! memory hungry.
 
+use std::mem;
 use std::cmp;
-use std::io::Read;
+use std::io::Write;
 use std::convert::TryInto;
-use byteorder::{ByteOrder, NativeEndian, ReadBytesExt, WriteBytesExt, LE};
+use byteorder::{ByteOrder, NativeEndian, WriteBytesExt, LE};
 use fehler::{throws};
 
 type Error = std::io::Error;
@@ -79,21 +80,27 @@ struct Duplicate {
 
 
 
-#[cfg(target_endian = "little")] fn archdep_zeros(i: u64) -> u32 { i.trailing_zeros() }
-#[cfg(target_endian = "big")] fn archdep_zeros(i: u64) -> u32 { i.leading_zeros() }
 
 fn count_matching_bytes(a: &[u8], b: &[u8]) -> usize {
+    const REGSIZE: usize = mem::size_of::<usize>();
+    fn read_usize(b: &[u8]) -> usize { // sadly byteorder doesn't have this
+        let mut buf = [0u8; REGSIZE];
+        buf.copy_from_slice(&b[..REGSIZE]);
+        usize::from_le_bytes(buf)
+    }
+    #[cfg(target_endian = "little")] fn archdep_zeros(i: usize) -> u32 { i.trailing_zeros() }
+    #[cfg(target_endian = "big")] fn archdep_zeros(i: usize) -> u32 { i.leading_zeros() }
+
     let mut matching_bytes = 0;
-    // match in chunks of 4 bytes so we process an 32 bits at a time
-    for (a, b) in a.chunks_exact(8).zip(b.chunks_exact(8)) {
-        let a = NativeEndian::read_u64(a);
-        let b = NativeEndian::read_u64(b);
+    // match in chunks of usize so we process a full register at a time instead of single bytes
+    for (a, b) in a.chunks_exact(REGSIZE).zip(b.chunks_exact(REGSIZE)) {
+        let a = read_usize(a);
+        let b = read_usize(b);
         let xor = a ^ b;
         if xor == 0 {
-            matching_bytes += 8;
+            matching_bytes += REGSIZE;
         } else {
-//            if matching_bytes == 0 && (xor as u32 != 0) { return 0; }
-            matching_bytes += (archdep_zeros(xor) / 8) as usize;
+            matching_bytes += (archdep_zeros(xor) / 8/*bits per byte*/) as usize;
             return matching_bytes;
         }
     }
@@ -101,41 +108,12 @@ fn count_matching_bytes(a: &[u8], b: &[u8]) -> usize {
     // we only return here if we ran out of data (i.e. all 4-byte blocks have matched)
     // but there may be up to 3 more bytes to check!
     let trailing_matches = a.iter().zip(b).skip(matching_bytes).take_while(|&(a, b)| a == b).count();
-    //let trailing_matches = a[matching_bytes..].iter().zip(&b[matching_bytes..]).take_while(|&(a, b)| a == b).count();
     matching_bytes + trailing_matches
 }
-/*
-#[cfg(target_endian = "little")] fn archdep_zeros(i: u32) -> u32 { i.trailing_zeros() }
-#[cfg(target_endian = "big")] fn archdep_zeros(i: u32) -> u32 { i.leading_zeros() }
 
-fn count_matching_bytes(a: &[u8], b: &[u8]) -> usize {
-     let mut matching_bytes = 0;
-     // match in chunks of 4 bytes so we process an 32 bits at a time
-     for (a, b) in a.chunks_exact(4).zip(b.chunks_exact(4)) {
-        let a = NativeEndian::read_u32(a);
-        let b = NativeEndian::read_u32(b);
-        let xor = a ^ b;
-        if xor == 0 {
-            matching_bytes += 4;
-        } else {
-            // optimization: if it doesn't match at all, don't even bother
-            // TODO: benchmark whether this is worth
-            if matching_bytes != 0 {
-                matching_bytes += archdep_zeros(xor) as usize / 8;
-            }
-            return matching_bytes;
-        }
-    }
-    
-    // we only return here if we ran out of data (i.e. all 4-byte blocks have matched)
-    // but there may be up to 3 more bytes to check!
-    let trailing_matches = a.iter().zip(b).skip(matching_bytes).take_while(|&(a, b)| a == b).count();
-    //let trailing_matches = a[matching_bytes..].iter().zip(&b[matching_bytes..]).take_while(|&(a, b)| a == b).count();
-    matching_bytes + trailing_matches
-}
-*/
+const ACCELERATION: usize = 1;
+const SKIP_TRIGGER: usize = 6; // for each 64 steps, skip in bigger increments
 
-use std::io::{Write, Cursor};
 #[throws]
 pub fn compress2<W: Write, T: EncoderTable>(input: &[u8], mut writer: W) {
     let mut table = T::default();
@@ -143,9 +121,8 @@ pub fn compress2<W: Write, T: EncoderTable>(input: &[u8], mut writer: W) {
     let mut cursor = 0;
     while cursor < input.len() {
         let literal_start = cursor;
-        
-        let LZ4_skipTrigger = 6;
-        let mut searchMatchNb = /*acceleration*/1 << LZ4_skipTrigger;
+
+        let mut step_counter = ACCELERATION << SKIP_TRIGGER;
         let mut step = 1;
         // look for a duplicate
         let duplicate = loop {
@@ -199,11 +176,11 @@ pub fn compress2<W: Write, T: EncoderTable>(input: &[u8], mut writer: W) {
             
             // no match, keep looping
             cursor += step;
-            step = searchMatchNb >> LZ4_skipTrigger;
+            step = step_counter >> SKIP_TRIGGER;
 
             // the first byte of each iteration doesn't count due to some weird-ass manual loop unrolling in the C code
             if literal_start+1 != cursor {
-                searchMatchNb += 1
+                step_counter += 1
             }
         };
         
