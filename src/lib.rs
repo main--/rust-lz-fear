@@ -302,8 +302,18 @@ pub fn decompress_file<R: Read>(reader: R) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use std::str;
-    use crate::compress::compress;
+    use crate::compress::compress2;
     use crate::decompress::decompress;
+    
+    fn compress(input: &[u8]) -> Vec<u8> {
+        let mut buf = Vec::new();
+        if input.len() <= 0xFFFF {
+            compress2::<_, crate::compress::U16Table>(input, &mut buf).unwrap();
+        } else {
+            compress2::<_, crate::compress::U32Table>(input, &mut buf).unwrap();
+        }
+        buf
+    }
 
     /// Test that the compressed string decompresses to the original string.
     fn inverse(s: &str) {

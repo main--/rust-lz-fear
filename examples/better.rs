@@ -65,7 +65,7 @@ fn main() -> io::Result<()> {
     let mut compressed2 = Vec::with_capacity(5 * 1024 * 1024);
     let source = buf.as_slice();
     for chunk in source.chunks(4*1024*1024) {
-        compress2::<_, U16Table>(chunk, &mut compressed2)?;
+        compress2::<_, U32Table>(chunk, &mut compressed2)?;
         file_out.write_u32::<LE>(compressed2.len() as u32)?;
         file_out.write_all(&compressed2)?;
         compressed2.clear();

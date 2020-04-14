@@ -1,9 +1,3 @@
-//! The compression algorithm.
-//!
-//! We make use of hash tables to find duplicates. This gives a reasonable compression ratio with a
-//! high performance. It has fixed memory usage, which contrary to other approachs, makes it less
-//! memory hungry.
-
 use std::mem;
 use std::cmp;
 use std::io::Write;
@@ -136,9 +130,8 @@ const ACCELERATION: usize = 1;
 const SKIP_TRIGGER: usize = 6; // for each 64 steps, skip in bigger increments
 
 #[throws]
-#[inline(never)]
 fn write_group<W: Write>(mut writer: &mut W, literal: &[u8], duplicate: Duplicate) {
-        let literal_len = literal.len(); //literal_end - literal_start;
+        let literal_len = literal.len();
 
         let mut token = 0;
         write_lsic_head(&mut token, 4, literal_len);
@@ -147,7 +140,6 @@ fn write_group<W: Write>(mut writer: &mut W, literal: &[u8], duplicate: Duplicat
         writer.write_u8(token)?;
         write_lsic_tail(&mut writer, literal_len)?;
         writer.write_all(literal)?;
-//        writer.write_all(&input[literal_start..literal_end])?;
         writer.write_u16::<LE>(duplicate.offset)?;
         write_lsic_tail(&mut writer, duplicate.extra_bytes)?;
 }
@@ -223,19 +215,6 @@ pub fn compress2<W: Write, T: EncoderTable>(input: &[u8], mut writer: W) {
         // cursor is now pointing past the match
         let literal_end = cursor - duplicate.extra_bytes - MINMATCH;
         write_group(&mut writer, &input[literal_start..literal_end], duplicate)?;
-        /*
-        let literal_len = literal_end - literal_start;
-        
-        let mut token = 0;
-        write_lsic_head(&mut token, 4, literal_len);
-        write_lsic_head(&mut token, 0, duplicate.extra_bytes);
-
-        writer.write_u8(token)?;
-        write_lsic_tail(&mut writer, literal_len)?;
-        writer.write_all(&input[literal_start..literal_end])?;
-        writer.write_u16::<LE>(duplicate.offset)?;
-        write_lsic_tail(&mut writer, duplicate.extra_bytes)?;
-        */
    }
 }
 fn write_lsic_head(token: &mut u8, shift: usize, value: usize) {
@@ -243,7 +222,6 @@ fn write_lsic_head(token: &mut u8, shift: usize, value: usize) {
     *token |= i << shift;
 }
 #[throws]
-#[inline]
 fn write_lsic_tail<W: Write>(writer: &mut W, mut value: usize) {
     if value < 0xF {
         return;
