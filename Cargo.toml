@@ -1,16 +1,16 @@
 [package]
-name = "lz4-compression"
-version = "0.6.0"
-authors = ["johannesvollmer <johannes.boenki@t-online.de>, ticki <Ticki@users.noreply.github.com>"]
+name = "lz-fear"
+version = "0.1.0"
+authors = ["main() <main@ehvag.de>"]
 edition = "2018"
 
-description = "Pure Rust implementation of LZ4 compression and decompression as a library"
+description = "A fast pure-rust no-unsafe implementation of LZ4 compression and decompression"
 keywords = ["compression", "lz4", "compress", "decompression", "decompress"]
 categories = [ "algorithms", "compression", "encoding" ]
-license = "MIT"
+#license = "MIT" license undecided
 readme = "README.md"
 
-repository = "https://github.com/johannesvollmer/lz4-compression-rs"
+repository = "https://github.com/main--/rust-lz-fear"
 
 [dependencies]
 byteorder = "1.3.1"

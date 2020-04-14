@@ -1,7 +1,8 @@
 # lz-fear
 
 This crate aims to implement the LZ4 compression and decompression algorithm, as well as the framing format used for LZ4 files, in **pure Rust** with **no unsafe code**.
-At the time of writing, this is the *fastest* no-unsafe implementation that I'm aware of.
+The output perfectly matches the C reference implementation byte for byte.
+At the time of writing, this is also the *fastest* no-unsafe implementation that I'm aware of.
 
 The [lz4](https://crates.io/crates/lz4) crate calls into the C library.
 The [compress](https://crates.io/crates/compress) crate has an implementation that relies on `unsafe`.
