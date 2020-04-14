@@ -23,10 +23,9 @@ const MINMATCH: usize = 4;
 
 
 pub trait EncoderTable: Default {
-    fn get(&self, key: &[u8]) -> usize;
-    // value is declared as usize but must not be above payload_size_limit
-    fn set(&mut self, key: &[u8], value: usize);
     fn payload_size_limit() -> usize;
+    // offset is declared as usize but must not be above payload_size_limit
+    fn replace(&mut self, input: &[u8], offset: usize) -> usize;
 }
 
 pub struct U32Table {
@@ -50,15 +49,15 @@ fn hash5(input: &[u8]) -> usize {
 }
 
 impl EncoderTable for U32Table {
-    fn get(&self, key: &[u8]) -> usize {
-        self.dict[hash5(key)].try_into().expect("This code is not supposed to run on a 16-bit arch (let alone smaller)")
-    }
-    fn set(&mut self, key: &[u8], value: usize) {
-        self.dict[hash5(key)] = value.try_into().expect("EncoderTable contract violated");
+    fn replace(&mut self, input: &[u8], offset: usize) -> usize {
+        let mut value = offset.try_into().expect("EncoderTable contract violated");
+        mem::swap(&mut self.dict[hash5(&input[offset..])], &mut value);
+        value.try_into().expect("This code is not supposed to run on a 16-bit arch (let alone smaller)")
     }
     fn payload_size_limit() -> usize { u32::MAX as usize }
 }
 
+/*
 struct U16Table {
     dict: [u16; DICTIONARY_SIZE*2],
 }
@@ -77,7 +76,7 @@ impl EncoderTable for U16Table {
     }
     fn payload_size_limit() -> usize { u16::MAX as usize }
 }
-
+*/
 
 #[derive(Copy, Clone, Debug)]
 struct Duplicate {
@@ -126,6 +125,23 @@ const ACCELERATION: usize = 1;
 const SKIP_TRIGGER: usize = 6; // for each 64 steps, skip in bigger increments
 
 #[throws]
+#[inline(never)]
+fn write_group<W: Write>(mut writer: &mut W, literal: &[u8], duplicate: Duplicate) {
+        let literal_len = literal.len(); //literal_end - literal_start;
+
+        let mut token = 0;
+        write_lsic_head(&mut token, 4, literal_len);
+        write_lsic_head(&mut token, 0, duplicate.extra_bytes);
+
+        writer.write_u8(token)?;
+        write_lsic_tail(&mut writer, literal_len)?;
+        writer.write_all(literal)?;
+//        writer.write_all(&input[literal_start..literal_end])?;
+        writer.write_u16::<LE>(duplicate.offset)?;
+        write_lsic_tail(&mut writer, duplicate.extra_bytes)?;
+}
+
+#[throws]
 pub fn compress2<W: Write, T: EncoderTable>(input: &[u8], mut writer: W) {
     assert!(input.len() <= T::payload_size_limit());
 
@@ -157,8 +173,7 @@ pub fn compress2<W: Write, T: EncoderTable>(input: &[u8], mut writer: W) {
             // we have to chop off the last five bytes though because the spec also (completely arbitrarily, I must say)
             // requires these to be encoded as literals (once again, our decoder does not require this)
             let current_batch = &input[cursor..(input.len() - 5)];
-            let candidate = table.get(current_batch);
-            table.set(current_batch, cursor);
+            let candidate = table.replace(input, cursor);
 
             if (cursor != 0) // can never match on the very first byte
                 && cursor - candidate <= 0xFFFF { // must be an addressable offset
@@ -177,11 +192,8 @@ pub fn compress2<W: Write, T: EncoderTable>(input: &[u8], mut writer: W) {
                     extra_bytes += backtrack;
                     cursor += matching_bytes;
 
-                    // not sure why exactly this, but that's what they do
-                    let minus_two = &input[cursor-2..];
-                    if minus_two.len() >= 4 {
-                        table.set(minus_two, cursor-2);
-                    }
+                    // not sure why exactly cursor - 2, but that's what they do
+                    table.replace(input, cursor - 2);
         
                     break Duplicate { offset, extra_bytes };
                 }
@@ -199,6 +211,8 @@ pub fn compress2<W: Write, T: EncoderTable>(input: &[u8], mut writer: W) {
         
         // cursor is now pointing past the match
         let literal_end = cursor - duplicate.extra_bytes - MINMATCH;
+        write_group(&mut writer, &input[literal_start..literal_end], duplicate)?;
+        /*
         let literal_len = literal_end - literal_start;
         
         let mut token = 0;
@@ -210,6 +224,7 @@ pub fn compress2<W: Write, T: EncoderTable>(input: &[u8], mut writer: W) {
         writer.write_all(&input[literal_start..literal_end])?;
         writer.write_u16::<LE>(duplicate.offset)?;
         write_lsic_tail(&mut writer, duplicate.extra_bytes)?;
+        */
    }
 }
 fn write_lsic_head(token: &mut u8, shift: usize, value: usize) {
@@ -217,6 +232,7 @@ fn write_lsic_head(token: &mut u8, shift: usize, value: usize) {
     *token |= i << shift;
 }
 #[throws]
+#[inline]
 fn write_lsic_tail<W: Write>(writer: &mut W, mut value: usize) {
     if value < 0xF {
         return;
