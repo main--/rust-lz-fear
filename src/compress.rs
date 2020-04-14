@@ -38,45 +38,56 @@ impl Default for U32Table {
 }
 
 
-// FIXME: only supposed to use this on 64bit arch
-fn hash5(input: &[u8]) -> usize {
-    // read 64 bits as 4+1 bytes
-    let upper_byte = input.get(4).copied().unwrap_or(0);
-    let v = NativeEndian::read_u32(input) as u64 | ((upper_byte as u64) << 32);
+// on 64 bit systems, we read 64 bits and hash 5 bytes instead of 4
+#[cfg(target_pointer_width = "64")]
+fn hash_for_u32(input: &[u8]) -> usize {
+    // read 64 bits if possible
+    let v = input.get(..8).map(NativeEndian::read_u64).unwrap_or(0);
+    // we end up only needing 5 bytes but the only case where this becomes
+    // zero is at the very end, where we're not allowed to produce matches anyways (see below)
 
-    // calculate a checksum
-    ((v << 24).wrapping_mul(889523592379) as usize) >> (64 - HASHLOG)
+    // calculate a bad but very cheap checksum
+    #[cfg(target_endian = "little")] fn checksum_u64(v: u64) -> u64 { (v << 24).wrapping_mul(889523592379) }
+    #[cfg(target_endian = "big")] fn checksum_u64(v: u64) -> u64 { (v >> 24).wrapping_mul(11400714785074694791) }
+    (checksum_u64(v) >> (64 - HASHLOG)) as usize
+}
+// on all other systems we simply hash 4 bytes, borrowing the algorithm for the u16 table
+#[cfg(not(target_pointer_width = "64"))]
+fn hash_for_u32(input: &[u8]) -> usize {
+    hash_for_u16(input) >> 1 // shift by one more because we have half as many slots as the u16 table
+}
+
+fn hash_for_u16(input: &[u8]) -> usize {
+    let v = NativeEndian::read_u32(input);
+    (v.wrapping_mul(2654435761) >> (32 - HASHLOG - 1)) as usize // shift by one less than hashlog because we have twice as many slots
 }
 
 impl EncoderTable for U32Table {
     fn replace(&mut self, input: &[u8], offset: usize) -> usize {
         let mut value = offset.try_into().expect("EncoderTable contract violated");
-        mem::swap(&mut self.dict[hash5(&input[offset..])], &mut value);
+        mem::swap(&mut self.dict[hash_for_u32(&input[offset..])], &mut value);
         value.try_into().expect("This code is not supposed to run on a 16-bit arch (let alone smaller)")
     }
     fn payload_size_limit() -> usize { u32::MAX as usize }
 }
 
-/*
-struct U16Table {
-    dict: [u16; DICTIONARY_SIZE*2],
+pub struct U16Table {
+    dict: [u16; DICTIONARY_SIZE*2], // u16 fits twice as many slots into the same amount of memory
 }
 impl Default for U16Table {
     fn default() -> Self {
         U16Table { dict: [0; DICTIONARY_SIZE*2] }
     }
 }
-// FIXME: not supposed to use hash5
 impl EncoderTable for U16Table {
-    fn get(&self, key: &[u8]) -> usize {
-        self.dict[hash5(key)].try_into().expect("what?")
-    }
-    fn set(&mut self, key: &[u8], value: usize) {
-        self.dict[hash5(key)] = value.try_into().expect("EncoderTable contract violated");
+    fn replace(&mut self, input: &[u8], offset: usize) -> usize {
+        let mut value = offset.try_into().expect("EncoderTable contract violated");
+        mem::swap(&mut self.dict[hash_for_u16(&input[offset..])], &mut value);
+        value.try_into().expect("This code is not supposed to run on an 8-bit arch either!")
     }
     fn payload_size_limit() -> usize { u16::MAX as usize }
 }
-*/
+
 
 #[derive(Copy, Clone, Debug)]
 struct Duplicate {
