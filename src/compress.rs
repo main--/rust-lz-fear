@@ -39,6 +39,7 @@ impl Default for U32Table {
 }
 
 
+// FIXME: only supposed to use this on 64bit arch
 fn hash5(input: &[u8]) -> usize {
     // read 64 bits as 4+1 bytes
     let upper_byte = input.get(4).copied().unwrap_or(0);
@@ -57,16 +58,27 @@ impl EncoderTable for U32Table {
     }
     fn payload_size_limit() -> usize { u32::MAX as usize }
 }
-/*
+
 struct U16Table {
     dict: [u16; DICTIONARY_SIZE*2],
 }
-impl EncoderTable for U16Table {
-     fn payload_size_limit() -> usize { u16::MAX as usize }
+impl Default for U16Table {
+    fn default() -> Self {
+        U16Table { dict: [0; DICTIONARY_SIZE*2] }
+    }
 }
-*/
+// FIXME: not supposed to use hash5
+impl EncoderTable for U16Table {
+    fn get(&self, key: &[u8]) -> usize {
+        self.dict[hash5(key)].try_into().expect("what?")
+    }
+    fn set(&mut self, key: &[u8], value: usize) {
+        self.dict[hash5(key)] = value.try_into().expect("EncoderTable contract violated");
+    }
+    fn payload_size_limit() -> usize { u16::MAX as usize }
+}
 
-/// A consecutive sequence of bytes found in already encoded part of the input.
+
 #[derive(Copy, Clone, Debug)]
 struct Duplicate {
     /// The number of bytes before our cursor, where the duplicate starts.
@@ -77,7 +89,6 @@ struct Duplicate {
     /// Adding four to this number yields the actual length.
     extra_bytes: usize,
 }
-
 
 
 
@@ -116,6 +127,8 @@ const SKIP_TRIGGER: usize = 6; // for each 64 steps, skip in bigger increments
 
 #[throws]
 pub fn compress2<W: Write, T: EncoderTable>(input: &[u8], mut writer: W) {
+    assert!(input.len() <= T::payload_size_limit());
+
     let mut table = T::default();
 
     let mut cursor = 0;
@@ -211,9 +224,9 @@ fn write_lsic_tail<W: Write>(writer: &mut W, mut value: usize) {
 
     value -= 0xF;
 
-    while value >= 4*0xFF {
+    while value >= 4 * 0xFF {
         writer.write_u32::<NativeEndian>(u32::MAX)?;
-        value -= 4*0xFF;
+        value -= 4 * 0xFF;
     }
     while value >= 0xFF {
         writer.write_u8(0xFF)?;
