@@ -50,7 +50,7 @@ fn main() -> io::Result<()> {
     let mut file_in = File::open(filename_in)?;
     let mut file_out = File::create(filename_out)?;
     
-    CompressionBuilder::default().content_checksum(false).independent_blocks(false).compress(file_in, file_out)?;
+    CompressionBuilder::default().content_checksum(false).independent_blocks(true).dictionary(0, &vec![0u8; 64 * 1024]).compress(file_in, file_out)?;
 
 /*
     let mut buf = Vec::new();

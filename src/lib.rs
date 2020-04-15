@@ -123,26 +123,37 @@ impl<'a> CompressionBuilder<'a> {
         if flags.contains(Flags::ContentSize) {
             // FIXME depends on seek
         }
-        
+
+        let mut template_table = U32Table::default();
+        let mut block_initializer: &[u8] = &[];
         if let Some((id, dict)) = self.dictionary {
-            header.write_u32::<LE>(id);
+//            header.write_u32::<LE>(id)?;
+
+            compress2(dict, 0, &mut template_table, io::sink()).unwrap();
+//            template_table.offset(dict.len());
+            block_initializer = dict;
+            println!("foo");
         }
 
         let mut hasher = XxHash32::with_seed(0);
-        hasher.write(&header[4..]);
+        hasher.write(&header[4..]); // skip magic for header checksum
         header.write_u8((hasher.finish() >> 8) as u8)?;
         writer.write_all(&header)?;
-    
+
+        // TODO: when doing dependent blocks or dictionaries, in_buffer's capacity is insufficient
         let mut in_buffer = Vec::with_capacity(self.block_size);
+        in_buffer.extend_from_slice(block_initializer);
         let mut out_buffer = vec![0u8; self.block_size];
-        let mut table = U32Table::default(); // FIXME broken
-        let mut window_offset = 0;
+        let mut table = template_table.clone();
         loop {
+            let window_offset = in_buffer.len();
+
             // We basically want read_exact semantics, except at the end.
             // Sadly read_exact specifies the buffer contents to be undefined
             // on error, so we have to use this construction instead.
             reader.by_ref().take(in_buffer.capacity() as u64).read_to_end(&mut in_buffer)?;
-            if in_buffer.len() == window_offset {
+            let read_bytes = in_buffer.len() - window_offset;
+            if read_bytes == 0 {
                 break;
             }
 
@@ -151,11 +162,11 @@ impl<'a> CompressionBuilder<'a> {
             // 1. limit output by input size so we never have negative compression ratio
             // 2. use a wrapper that forbids partial writes, so don't write 32-bit integers
             //    as four individual bytes with four individual range checks
-            let mut cursor = NoPartialWrites(&mut out_buffer[..in_buffer.len()]);
+            let mut cursor = NoPartialWrites(&mut out_buffer[..read_bytes]);
             match compress2(&in_buffer, window_offset, &mut table, &mut cursor) {
                 Ok(()) => {
                     let not_written_len = cursor.0.len();
-                    let written_len = in_buffer.len() - not_written_len;
+                    let written_len = read_bytes - not_written_len;
 //println!("{} -> {}", in_buffer.len(), written_len);
                     writer.write_u32::<LE>(written_len as u32)?;
                     writer.write_all(&out_buffer[..written_len])?;
@@ -164,23 +175,23 @@ impl<'a> CompressionBuilder<'a> {
                     assert!(e.kind() == ErrorKind::ConnectionAborted);
                     // incompressible
 //println!("{} -> XXX", in_buffer.len());
-                    writer.write_u32::<LE>((in_buffer.len() as u32) | INCOMPRESSIBLE)?;
-                    writer.write_all(&in_buffer)?;
+                    writer.write_u32::<LE>((read_bytes as u32) | INCOMPRESSIBLE)?;
+                    writer.write_all(&in_buffer[..read_bytes])?;
                 }
             }
 
             if flags.contains(Flags::IndependentBlocks) {
                 // clear table
-                // TODO: dictionary
                 in_buffer.clear();
-                table = U32Table::default();
+                in_buffer.extend_from_slice(block_initializer);
+
+                table = template_table.clone();
             } else {
                 if in_buffer.len() > WINDOW_SIZE {
                     let how_much_to_forget = in_buffer.len() - WINDOW_SIZE;
                     table.offset(how_much_to_forget);
                     in_buffer.drain(..how_much_to_forget);
                 }
-                window_offset = in_buffer.len();
             }
         }
         writer.write_u32::<LE>(0)?;

@@ -24,6 +24,7 @@ pub trait EncoderTable {
     fn offset(&mut self, offset: usize);
 }
 
+#[derive(Clone)]
 pub struct U32Table {
     dict: [u32; DICTIONARY_SIZE],
     offset: usize,
