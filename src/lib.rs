@@ -95,7 +95,7 @@ impl<'a> CompressionBuilder<'a> {
 
     #[throws(io::Error)]
     pub fn compress<R: Read, W: Write>(&self, mut reader: R, mut writer: W) {
-        use crate::compress::{U32Table, compress2};
+        use crate::compress::{U32Table, compress2, EncoderTable};
 
         let mut flags = Flags::empty();
         if self.independent_blocks {
@@ -136,22 +136,23 @@ impl<'a> CompressionBuilder<'a> {
         let mut in_buffer = Vec::with_capacity(self.block_size);
         let mut out_buffer = vec![0u8; self.block_size];
         let mut table = U32Table::default(); // FIXME broken
+        let mut window_offset = 0;
         loop {
             // We basically want read_exact semantics, except at the end.
             // Sadly read_exact specifies the buffer contents to be undefined
             // on error, so we have to use this construction instead.
             reader.by_ref().take(in_buffer.capacity() as u64).read_to_end(&mut in_buffer)?;
-            if in_buffer.is_empty() {
+            if in_buffer.len() == window_offset {
                 break;
             }
-            
+
             // TODO: implement u16 table for small inputs
-            
+
             // 1. limit output by input size so we never have negative compression ratio
             // 2. use a wrapper that forbids partial writes, so don't write 32-bit integers
             //    as four individual bytes with four individual range checks
             let mut cursor = NoPartialWrites(&mut out_buffer[..in_buffer.len()]);
-            match compress2(&in_buffer, &mut table, &mut cursor) {
+            match compress2(&in_buffer, window_offset, &mut table, &mut cursor) {
                 Ok(()) => {
                     let not_written_len = cursor.0.len();
                     let written_len = in_buffer.len() - not_written_len;
@@ -167,11 +168,19 @@ impl<'a> CompressionBuilder<'a> {
                     writer.write_all(&in_buffer)?;
                 }
             }
-            in_buffer.clear();
+
             if flags.contains(Flags::IndependentBlocks) {
                 // clear table
                 // TODO: dictionary
+                in_buffer.clear();
                 table = U32Table::default();
+            } else {
+                if in_buffer.len() > WINDOW_SIZE {
+                    let how_much_to_forget = in_buffer.len() - WINDOW_SIZE;
+                    table.offset(how_much_to_forget);
+                    in_buffer.drain(..how_much_to_forget);
+                }
+                window_offset = in_buffer.len();
             }
         }
         writer.write_u32::<LE>(0)?;

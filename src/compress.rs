@@ -1,7 +1,7 @@
 use std::mem;
 use std::cmp;
 use std::io::Write;
-use std::convert::TryInto;
+use std::convert::{TryInto, TryFrom};
 use byteorder::{ByteOrder, NativeEndian, WriteBytesExt, LE};
 use fehler::{throws};
 
@@ -20,14 +20,17 @@ pub trait EncoderTable {
     fn payload_size_limit() -> usize;
     // offset is declared as usize but must not be above payload_size_limit
     fn replace(&mut self, input: &[u8], offset: usize) -> usize;
+
+    fn offset(&mut self, offset: usize);
 }
 
 pub struct U32Table {
     dict: [u32; DICTIONARY_SIZE],
+    offset: usize,
 }
 impl Default for U32Table {
     fn default() -> Self {
-        U32Table { dict: [0; DICTIONARY_SIZE] }
+        U32Table { dict: [0; DICTIONARY_SIZE], offset: 0 }
     }
 }
 
@@ -58,26 +61,38 @@ fn hash_for_u16(input: &[u8]) -> usize {
 
 impl EncoderTable for U32Table {
     fn replace(&mut self, input: &[u8], offset: usize) -> usize {
-        let mut value = offset.try_into().expect("EncoderTable contract violated");
+        let o = offset + self.offset; // apply positive offset on input
+
+        let mut value = o.try_into().expect("EncoderTable contract violated");
         mem::swap(&mut self.dict[hash_for_u32(&input[offset..])], &mut value);
-        value.try_into().expect("This code is not supposed to run on a 16-bit arch (let alone smaller)")
+        usize::try_from(value).expect("This code is not supposed to run on a 16-bit arch (let alone smaller)")
+            .saturating_sub(self.offset)
+//            - self.offset // apply negative offset on output
+    }
+    fn offset(&mut self, offset: usize) {
+        self.offset += offset;
     }
     fn payload_size_limit() -> usize { u32::MAX as usize }
 }
 
 pub struct U16Table {
     dict: [u16; DICTIONARY_SIZE*2], // u16 fits twice as many slots into the same amount of memory
+    offset: usize,
 }
 impl Default for U16Table {
     fn default() -> Self {
-        U16Table { dict: [0; DICTIONARY_SIZE*2] }
+        U16Table { dict: [0; DICTIONARY_SIZE*2], offset: 0 }
     }
 }
 impl EncoderTable for U16Table {
     fn replace(&mut self, input: &[u8], offset: usize) -> usize {
+    unimplemented!();
         let mut value = offset.try_into().expect("EncoderTable contract violated");
         mem::swap(&mut self.dict[hash_for_u16(&input[offset..])], &mut value);
         value.try_into().expect("This code is not supposed to run on an 8-bit arch either!")
+    }
+    fn offset(&mut self, offset: usize) {
+        self.offset += offset;
     }
     fn payload_size_limit() -> usize { u16::MAX as usize }
 }
@@ -145,10 +160,10 @@ fn write_group<W: Write>(mut writer: &mut W, literal: &[u8], duplicate: Duplicat
 }
 
 #[throws]
-pub fn compress2<W: Write, T: EncoderTable>(input: &[u8], table: &mut T, mut writer: W) {
+pub fn compress2<W: Write, T: EncoderTable>(input: &[u8], cursor: usize, table: &mut T, mut writer: W) {
     assert!(input.len() <= T::payload_size_limit());
 
-    let mut cursor = 0;
+    let mut cursor = cursor;
     while cursor < input.len() {
         let literal_start = cursor;
 
