@@ -1,14 +1,20 @@
+#![forbid(unsafe_code)]
+#![allow(non_upper_case_globals)]
+
 pub mod decompress;
 pub mod compress;
 
-use byteorder::{LE, ReadBytesExt};
+use byteorder::{LE, ReadBytesExt, WriteBytesExt};
 use std::hash::Hasher;
-use std::io::{self, Read, BufRead, Error as IoError, ErrorKind};
+use std::io::{self, Read, BufRead, Write, Seek, Error as IoError, ErrorKind};
 use std::cmp;
+use std::mem;
 use std::convert::TryInto;
 use twox_hash::XxHash32;
 use thiserror::Error;
 use fehler::{throw, throws};
+use bitflags::bitflags;
+use derive_builder::Builder;
 
 #[derive(Error, Debug)]
 pub enum DecompressionError {
@@ -45,34 +51,213 @@ impl From<DecompressionError> for io::Error {
 }
 
 
+pub struct CompressionBuilder<'a> {
+    independent_blocks: bool,
+    block_checksums: bool,
+    content_checksum: bool,
+    block_size: usize,
+    dictionary: Option<(u32, &'a [u8])>,
+}
+impl<'a> Default for CompressionBuilder<'a> {
+    fn default() -> Self {
+        Self {
+            independent_blocks: true,
+            block_checksums: false,
+            content_checksum: true,
+            block_size: 4 * 1024 * 1024,
+            dictionary: None,
+        }
+    }
+}
+impl<'a> CompressionBuilder<'a> {
+    pub fn independent_blocks(&mut self, v: bool) -> &mut Self {
+        self.independent_blocks = v;
+        self
+    }
+    pub fn block_checksums(&mut self, v: bool) -> &mut Self {
+        self.block_checksums = v;
+        self
+    }
+    pub fn content_checksum(&mut self, v: bool) -> &mut Self {
+        self.content_checksum = v;
+        self
+    }
+    /// Only valid values are 4MB, 1MB, 256KB, 64KB
+    /// (TODO: better interface for this)
+    pub fn block_size(&mut self, v: usize) -> &mut Self {
+        self.block_size = v;
+        self
+    }
+    pub fn dictionary(&mut self, id: u32, dict: &'a [u8]) -> &mut Self {
+        self.dictionary = Some((id, dict));
+        self
+    }
 
+    #[throws(io::Error)]
+    pub fn compress<R: Read, W: Write>(&self, mut reader: R, mut writer: W) {
+        use crate::compress::{U32Table, compress2};
+
+        let mut flags = Flags::empty();
+        if self.independent_blocks {
+            flags |= Flags::IndependentBlocks;
+        }
+        if self.block_checksums {
+            flags |= Flags::BlockChecksums;
+        }
+        if self.content_checksum {
+            flags |= Flags::ContentChecksum;
+        }
+        if self.dictionary.is_some() { // TODO FIXME
+            flags |= Flags::DictionaryId;
+        }
+
+        let version = 1 << 6;
+        let flag_byte = version | flags.bits();
+        let bd_byte = BlockDescriptor::new(self.block_size).0;
+
+        let mut header = Vec::new();
+        header.write_u32::<LE>(MAGIC)?;
+        header.write_u8(flag_byte)?;
+        header.write_u8(bd_byte)?;
+        
+        if flags.contains(Flags::ContentSize) {
+            // FIXME depends on seek
+        }
+        
+        if let Some((id, dict)) = self.dictionary {
+            header.write_u32::<LE>(id);
+        }
+
+        let mut hasher = XxHash32::with_seed(0);
+        hasher.write(&header[4..]);
+        header.write_u8((hasher.finish() >> 8) as u8)?;
+        writer.write_all(&header)?;
+    
+        let mut in_buffer = Vec::with_capacity(self.block_size);
+        let mut out_buffer = vec![0u8; self.block_size];
+        loop {
+            // We basically want read_exact semantics, except at the end.
+            // Sadly read_exact specifies the buffer contents to be undefined
+            // on error, so we have to use this construction instead.
+            reader.by_ref().take(in_buffer.capacity() as u64).read_to_end(&mut in_buffer)?;
+            if in_buffer.is_empty() {
+                break;
+            }
+
+            // 1. limit output by input size so we never have negative compression ratio
+            // 2. use a wrapper that forbids partial writes, so don't write 32-bit integers
+            //    as four individual bytes with four individual range checks
+            let mut cursor = NoPartialWrites(&mut out_buffer[..in_buffer.len()]);
+            match compress2::<_, U32Table>(&in_buffer, &mut cursor) {
+                Ok(()) => {
+                    let not_written_len = cursor.0.len();
+                    let written_len = in_buffer.len() - not_written_len;
+//println!("{} -> {}", in_buffer.len(), written_len);
+                    writer.write_u32::<LE>(written_len as u32)?;
+                    writer.write_all(&out_buffer[..written_len])?;
+                }
+                Err(e) => {
+                    assert!(e.kind() == ErrorKind::ConnectionAborted);
+                    // incompressible
+//println!("{} -> XXX", in_buffer.len());
+                    writer.write_u32::<LE>((in_buffer.len() as u32) | INCOMPRESSIBLE)?;
+                    writer.write_all(&in_buffer)?;
+                }
+            }
+            in_buffer.clear();
+        }
+        writer.write_u32::<LE>(0)?;
+    }
+    pub fn compress_with_size<R: Read + Seek>(&self, reader: R) {
+//        reader.
+    }
+}
+
+struct NoPartialWrites<'a>(&'a mut [u8]);
+impl<'a> Write for NoPartialWrites<'a> {
+    #[inline]
+    fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+        if self.0.len() < data.len() {
+            // quite frankly this doesn't matter
+            return Err(ErrorKind::ConnectionAborted.into());
+        }
+
+        let amt = data.len();
+        let (a, b) = mem::replace(&mut self.0, &mut []).split_at_mut(data.len());
+        a.copy_from_slice(data);
+        self.0 = b;
+        Ok(amt)
+    }
+
+/*
+    #[inline]
+    fn write_all(&mut self, data: &[u8]) -> io::Result<()> {
+        let amt = data.len();
+        let (a, b) = mem::replace(&mut self.0, &mut []).split_at_mut(amt);
+        a.copy_from_slice(&data[..amt]);
+        self.0 = b;
+        Ok(())
+    }
+*/
+
+    #[inline]
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+
+const MAGIC: u32 = 0x184D2204;
+const INCOMPRESSIBLE: u32 = 1 << 31;
 const WINDOW_SIZE: usize = 64 * 1024;
 
+bitflags! {
+    struct Flags: u8 {
+        const IndependentBlocks = 0b00100000;
+        const BlockChecksums    = 0b00010000;
+        const ContentSize       = 0b00001000;
+        const ContentChecksum   = 0b00000100;
+        const DictionaryId      = 0b00000001;
+    }
+}
 
-struct Flags(u8);
-// TODO: debug impl
+pub type Flags2 = Flags;
+pub type Bd2 = BlockDescriptor;
+
 impl Flags {
     #[throws]
     fn parse(i: u8) -> Self {
-        if (i >> 6) != 1 {
-            throw!(DecompressionError::UnsupportedVersion(i >> 6));
+        let version = i >> 6;
+        if version != 1 {
+            throw!(DecompressionError::UnsupportedVersion(version));
         }
         if (i & 0b10) != 0 {
             throw!(DecompressionError::ReservedFlagBitsSet);
         }
 
-        Flags(i)
+        Flags::from_bits_truncate(i)
     }
 
-    fn independent_blocks(&self) -> bool { (self.0 & 0b00100000) != 0 }
-    fn block_checksums(&self)    -> bool { (self.0 & 0b00010000) != 0 }
-    fn content_size(&self)       -> bool { (self.0 & 0b00001000) != 0 }
-    fn content_checksum(&self)   -> bool { (self.0 & 0b00000100) != 0 }
-    fn dictionary_id(&self)      -> bool { (self.0 & 0b00000001) != 0 }
+    fn independent_blocks(&self) -> bool { self.contains(Flags::IndependentBlocks) }
+    fn block_checksums(&self)    -> bool { self.contains(Flags::BlockChecksums) }
+    fn content_size(&self)       -> bool { self.contains(Flags::ContentSize) }
+    fn content_checksum(&self)   -> bool { self.contains(Flags::ContentChecksum) }
+    fn dictionary_id(&self)      -> bool { self.contains(Flags::DictionaryId) }
 }
 
-struct BlockDescriptor(u8); // ??? or what else could "BD" stand for ???
+struct BlockDescriptor(pub u8); // ??? or what else could "BD" stand for ???
 impl BlockDescriptor {
+//    #[throws]
+    fn new(block_maxsize: usize) -> Self {
+        let mut v = 0;
+        
+        let maybe_maxsize = ((block_maxsize.trailing_zeros().saturating_sub(8)) / 2) as u8;
+        let bd = BlockDescriptor::parse(maybe_maxsize << 4).unwrap();
+        assert_eq!(block_maxsize, bd.block_maxsize().unwrap());
+
+        bd
+    }
+
     #[throws]
     fn parse(i: u8) -> Self {
         if (i & 0b10001111) != 0 {
@@ -140,7 +325,7 @@ impl<R: Read> LZ4FrameReader<R> {
     #[throws]
     pub fn new(mut reader: R) -> Self {
         let magic = reader.read_u32::<LE>()?;
-        if magic != 0x184D2204 {
+        if magic != MAGIC {
             throw!(DecompressionError::WrongMagic(magic));
         }
 
@@ -148,7 +333,7 @@ impl<R: Read> LZ4FrameReader<R> {
         let bd = BlockDescriptor::parse(reader.read_u8()?)?;
 
         let mut hasher = XxHash32::with_seed(0);
-        hasher.write_u8(flags.0);
+        hasher.write_u8(flags.bits());
         hasher.write_u8(bd.0);
 
         let content_size = if flags.content_size() {
@@ -230,8 +415,8 @@ impl<R: Read> LZ4FrameReader<R> {
             return;
         }
 
-        let is_compressed = block_length & 0x80_00_00_00 == 0;
-        let block_length = block_length & 0x7f_ff_ff_ff;
+        let is_compressed = block_length & INCOMPRESSIBLE == 0;
+        let block_length = block_length & !INCOMPRESSIBLE;
 
         let buf = &mut self.read_buf;
         buf.resize(block_length.try_into().or(Err(DecompressionError::BlockLengthOverflow))?, 0);

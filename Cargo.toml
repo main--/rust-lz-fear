@@ -18,6 +18,8 @@ twox-hash = "1.5.0"
 thiserror = "1.0"
 fehler = "1.0"
 cfg-if = "0.1.10"
+bitflags = "1.2.1"
+derive_builder = "0.9"
 
 [dev-dependencies]
 criterion = "0.3"
