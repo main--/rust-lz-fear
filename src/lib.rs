@@ -135,6 +135,7 @@ impl<'a> CompressionBuilder<'a> {
     
         let mut in_buffer = Vec::with_capacity(self.block_size);
         let mut out_buffer = vec![0u8; self.block_size];
+        let mut table = U32Table::default(); // FIXME broken
         loop {
             // We basically want read_exact semantics, except at the end.
             // Sadly read_exact specifies the buffer contents to be undefined
@@ -143,12 +144,14 @@ impl<'a> CompressionBuilder<'a> {
             if in_buffer.is_empty() {
                 break;
             }
-
+            
+            // TODO: implement u16 table for small inputs
+            
             // 1. limit output by input size so we never have negative compression ratio
             // 2. use a wrapper that forbids partial writes, so don't write 32-bit integers
             //    as four individual bytes with four individual range checks
             let mut cursor = NoPartialWrites(&mut out_buffer[..in_buffer.len()]);
-            match compress2::<_, U32Table>(&in_buffer, &mut cursor) {
+            match compress2(&in_buffer, &mut table, &mut cursor) {
                 Ok(()) => {
                     let not_written_len = cursor.0.len();
                     let written_len = in_buffer.len() - not_written_len;
@@ -165,6 +168,11 @@ impl<'a> CompressionBuilder<'a> {
                 }
             }
             in_buffer.clear();
+            if flags.contains(Flags::IndependentBlocks) {
+                // clear table
+                // TODO: dictionary
+                table = U32Table::default();
+            }
         }
         writer.write_u32::<LE>(0)?;
     }

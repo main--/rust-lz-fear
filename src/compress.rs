@@ -16,7 +16,7 @@ const HASHLOG: usize = 12;
 const MINMATCH: usize = 4;
 
 
-pub trait EncoderTable: Default {
+pub trait EncoderTable {
     fn payload_size_limit() -> usize;
     // offset is declared as usize but must not be above payload_size_limit
     fn replace(&mut self, input: &[u8], offset: usize) -> usize;
@@ -145,10 +145,8 @@ fn write_group<W: Write>(mut writer: &mut W, literal: &[u8], duplicate: Duplicat
 }
 
 #[throws]
-pub fn compress2<W: Write, T: EncoderTable>(input: &[u8], mut writer: W) {
+pub fn compress2<W: Write, T: EncoderTable>(input: &[u8], table: &mut T, mut writer: W) {
     assert!(input.len() <= T::payload_size_limit());
-
-    let mut table = T::default();
 
     let mut cursor = 0;
     while cursor < input.len() {
