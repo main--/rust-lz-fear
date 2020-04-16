@@ -1,5 +1,5 @@
 use lz_fear::compress::{compress2,U32Table,U16Table};
-use lz_fear::CompressionBuilder;
+use lz_fear::CompressionSettings;
 use std::fs::File;
 use std::io::{self, Write, Read, ErrorKind};
 use std::env;
@@ -50,7 +50,7 @@ fn main() -> io::Result<()> {
     let mut file_in = File::open(filename_in)?;
     let mut file_out = File::create(filename_out)?;
     
-    CompressionBuilder::default().content_checksum(true).independent_blocks(true)/*.dictionary(0, &vec![0u8; 64 * 1024])*/.compress(file_in, file_out)?;
+    CompressionSettings::default().content_checksum(true).independent_blocks(true)/*.dictionary(0, &vec![0u8; 64 * 1024])*/.compress(file_in, file_out)?;
 
 /*
     let mut buf = Vec::new();

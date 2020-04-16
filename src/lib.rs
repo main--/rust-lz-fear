@@ -51,14 +51,14 @@ impl From<DecompressionError> for io::Error {
 }
 
 
-pub struct CompressionBuilder<'a> {
+pub struct CompressionSettings<'a> {
     independent_blocks: bool,
     block_checksums: bool,
     content_checksum: bool,
     block_size: usize,
     dictionary: Option<(u32, &'a [u8])>,
 }
-impl<'a> Default for CompressionBuilder<'a> {
+impl<'a> Default for CompressionSettings<'a> {
     fn default() -> Self {
         Self {
             independent_blocks: true,
@@ -69,7 +69,7 @@ impl<'a> Default for CompressionBuilder<'a> {
         }
     }
 }
-impl<'a> CompressionBuilder<'a> {
+impl<'a> CompressionSettings<'a> {
     pub fn independent_blocks(&mut self, v: bool) -> &mut Self {
         self.independent_blocks = v;
         self
