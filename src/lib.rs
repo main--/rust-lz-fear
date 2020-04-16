@@ -14,7 +14,7 @@ use twox_hash::XxHash32;
 use thiserror::Error;
 use fehler::{throw, throws};
 use bitflags::bitflags;
-use derive_builder::Builder;
+
 
 #[derive(Error, Debug)]
 pub enum DecompressionError {
@@ -118,7 +118,7 @@ impl<'a> CompressionSettings<'a> {
     }
 
     #[throws(io::Error)]
-    pub fn compress_with_size_unchecked<R: Read, W: Write>(&self, mut reader: R, mut writer: W, content_size: u64) {
+    pub fn compress_with_size_unchecked<R: Read, W: Write>(&self, reader: R, writer: W, content_size: u64) {
         self.compress_internal(reader, writer, Some(content_size))?;
     }
 
@@ -128,7 +128,7 @@ impl<'a> CompressionSettings<'a> {
         // then again, we implement this to ignore the all bytes before the cursor which stream_len() does not
         let start = reader.seek(SeekFrom::Current(0))?;
         let end = reader.seek(SeekFrom::End(0))?;
-        reader.seek(SeekFrom::Start(start));
+        reader.seek(SeekFrom::Start(start))?;
 
         let length = end - start;
         self.compress_internal(reader, writer, Some(length))?;
@@ -171,7 +171,7 @@ impl<'a> CompressionSettings<'a> {
             header.write_u64::<LE>(content_size.unwrap())?;
         }
         if let Some(id) = self.dictionary_id {
-            header.write_u32::<LE>(id);
+            header.write_u32::<LE>(id)?;
         }
 
         let mut hasher = XxHash32::with_seed(0);
@@ -310,9 +310,6 @@ bitflags! {
     }
 }
 
-pub type Flags2 = Flags;
-pub type Bd2 = BlockDescriptor;
-
 impl Flags {
     #[throws]
     fn parse(i: u8) -> Self {
@@ -338,8 +335,6 @@ struct BlockDescriptor(pub u8); // ??? or what else could "BD" stand for ???
 impl BlockDescriptor {
 //    #[throws]
     fn new(block_maxsize: usize) -> Self {
-        let mut v = 0;
-        
         let maybe_maxsize = ((block_maxsize.trailing_zeros().saturating_sub(8)) / 2) as u8;
         let bd = BlockDescriptor::parse(maybe_maxsize << 4).unwrap();
         assert_eq!(block_maxsize, bd.block_maxsize().unwrap());
