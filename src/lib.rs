@@ -2,8 +2,9 @@
 
 pub mod decompress;
 pub mod compress;
-pub mod header;
+mod header;
 
+pub use decompress::LZ4FrameReader;
 
 
 const MAGIC: u32 = 0x184D2204;

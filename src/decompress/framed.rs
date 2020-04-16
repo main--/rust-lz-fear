@@ -12,12 +12,13 @@ use crate::header::{self, Flags, BlockDescriptor};
 use super::raw;
 
 
+/// Errors when decompressiong an LZ4 frame.
 #[derive(Error, Debug)]
 pub enum DecompressionError {
     #[error("error reading from the input you gave me")]
     InputError(#[from] io::Error),
     #[error("the raw LZ4 decompression failed (data corruption?)")]
-    CodecError(#[from] raw::Error),
+    CodecError(#[from] raw::DecodeError),
     #[error("invalid header")]
     HeaderParseError(#[from] header::ParseError),
     #[error("wrong magic number in file header: {0:08x}")]
@@ -33,13 +34,15 @@ pub enum DecompressionError {
     #[error("a block decompressed to more data than allowed")]
     BlockSizeOverflow,
 }
-type Error = DecompressionError;
-impl From<DecompressionError> for io::Error {
-    fn from(e: DecompressionError) -> io::Error {
+type Error = DecompressionError; // do it this way for better docs
+
+impl From<Error> for io::Error {
+    fn from(e: Error) -> io::Error {
         io::Error::new(ErrorKind::Other, e)
     }
 }
 
+/// Wrapper around `LZ4FrameReader` that implements `Read` and `BufRead`.
 pub struct LZ4FrameIoReader<R: Read> {
     frame_reader: LZ4FrameReader<R>,
     bytes_taken: usize,
@@ -72,6 +75,9 @@ impl<R: Read> BufRead for LZ4FrameIoReader<R> {
     }
 }
 
+/// Read an LZ4-compressed frame.
+///
+/// This reader reads the blocks inside a frame one by one.
 pub struct LZ4FrameReader<R: Read> {
     reader: R,
     flags: Flags,
@@ -89,7 +95,7 @@ impl<R: Read> LZ4FrameReader<R> {
     pub fn new(mut reader: R) -> Self {
         let magic = reader.read_u32::<LE>()?;
         if magic != MAGIC {
-            throw!(DecompressionError::WrongMagic(magic));
+            throw!(Error::WrongMagic(magic));
         }
 
         let flags = Flags::parse(reader.read_u8()?)?;
@@ -118,7 +124,7 @@ impl<R: Read> LZ4FrameReader<R> {
         let header_checksum_desired = reader.read_u8()?;
         let header_checksum_actual = (hasher.finish() >> 8) as u8;
         if header_checksum_desired != header_checksum_actual {
-            throw!(DecompressionError::HeaderChecksumFail);
+            throw!(Error::HeaderChecksumFail);
         }
 
         let content_hasher = if flags.content_checksum() {
@@ -171,7 +177,7 @@ impl<R: Read> LZ4FrameReader<R> {
             if let Some(hasher) = self.content_hasher.take() {
                 let checksum = reader.read_u32::<LE>()?;
                 if hasher.finish() != checksum.into() {
-                    throw!(DecompressionError::FrameChecksumFail);
+                    throw!(Error::FrameChecksumFail);
                 }
             }
             self.finished = true;
@@ -182,7 +188,7 @@ impl<R: Read> LZ4FrameReader<R> {
         let block_length = block_length & !INCOMPRESSIBLE;
 
         let buf = &mut self.read_buf;
-        buf.resize(block_length.try_into().or(Err(DecompressionError::BlockLengthOverflow))?, 0);
+        buf.resize(block_length.try_into().or(Err(Error::BlockLengthOverflow))?, 0);
         reader.read_exact(buf.as_mut_slice())?;
 
         if self.flags.block_checksums() {
@@ -190,13 +196,13 @@ impl<R: Read> LZ4FrameReader<R> {
             let mut hasher = XxHash32::with_seed(0);
             hasher.write(&buf);
             if hasher.finish() != checksum.into() {
-                throw!(DecompressionError::BlockChecksumFail);
+                throw!(Error::BlockChecksumFail);
             }
         }
 
         if is_compressed {
             if let Some(window) = self.carryover_window.as_mut() {
-                raw::decompress_block(&buf, &window, output)?;
+                raw::decompress_raw(&buf, &window, output)?;
 
                 let outlen = output.len();
                 if outlen < WINDOW_SIZE {
@@ -210,14 +216,14 @@ impl<R: Read> LZ4FrameReader<R> {
 
                 assert!(window.len() <= WINDOW_SIZE);
             } else {
-                raw::decompress_block(&buf, &[], output)?;
+                raw::decompress_raw(&buf, &[], output)?;
             }
         } else {
             output.extend_from_slice(&buf);
         }
 
         if output.len() > self.block_maxsize {
-            throw!(DecompressionError::BlockSizeOverflow);
+            throw!(Error::BlockSizeOverflow);
         }
 
         if let Some(hasher) = self.content_hasher.as_mut() {
@@ -226,21 +232,11 @@ impl<R: Read> LZ4FrameReader<R> {
     }
 }
 
+/// Convenience wrapper around `LZ4FrameReader` that reads everything into a vector and returns it.
 #[throws]
-pub fn decompress_file<R: Read>(reader: R) -> Vec<u8> {
-    let mut reader = LZ4FrameReader::new(reader)?;
-
+pub fn decompress_frame<R: Read>(reader: R) -> Vec<u8> {
     let mut plaintext = Vec::new();
-
-    let mut buf = Vec::with_capacity(reader.block_size());
-    loop {
-        reader.decode_block(&mut buf)?;
-        let len = buf.len();
-        if len == 0 { break; }
-        plaintext.extend_from_slice(&buf[..len]);
-        buf.clear();
-    }
-
+    LZ4FrameReader::new(reader)?.into_read().read_to_end(&mut plaintext)?;
     plaintext
 }
 

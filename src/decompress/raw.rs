@@ -3,8 +3,9 @@ use std::io::{self, Cursor, Read, ErrorKind};
 use thiserror::Error;
 use fehler::{throws};
 
+/// Errors when decoding a raw LZ4 block.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Error)]
-pub enum Error {
+pub enum DecodeError {
     #[error("Block stream ended prematurely. Either your input was truncated or you're trying to decompress garbage.")]
     UnexpectedEnd,
     #[error("The offset for a deduplication is zero. This is always invalid. You are probably decoding corrupted input.")]
@@ -12,6 +13,8 @@ pub enum Error {
     #[error("The offset for a deduplication is out of bounds. This may be caused by a missing or incomplete dictionary.")]
     InvalidDeduplicationOffset,
 }
+type Error = DecodeError; // do it this way for better docs
+
 impl From<io::Error> for Error {
     fn from(e: io::Error) -> Error {
         // this is the only kind of IO error that can happen in this code as we are always reading from slices
@@ -47,7 +50,7 @@ fn read_lsic(initial: u8, cursor: &mut Cursor<&[u8]>) -> usize {
 /// This function is based around memory buffers because that's what LZ4 intends.
 /// If your blocks don't fit in your memory, you should use smaller blocks.
 #[throws]
-pub fn decompress_block(input: &[u8], prefix: &[u8], output: &mut Vec<u8>) {
+pub fn decompress_raw(input: &[u8], prefix: &[u8], output: &mut Vec<u8>) {
     let mut reader = Cursor::new(input);
     while let Ok(token) = reader.read_u8() {
         // read literals
@@ -125,10 +128,11 @@ fn copy_overlapping(offset: usize, match_len: usize, prefix: &[u8], output: &mut
     Ok(())
 }
 
+/// Convenience wrapper around `decompress_raw` that simply allocates a vector for you and returns it.
 #[throws]
-pub fn decompress(input: &[u8]) -> Vec<u8> {
+pub fn decompress_raw_block(input: &[u8]) -> Vec<u8> {
     let mut vec = Vec::new();
-    decompress_block(input, &[], &mut vec)?;
+    decompress_raw(input, &[], &mut vec)?;
     vec
 }
 
