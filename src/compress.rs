@@ -1,9 +1,9 @@
-use std::{mem, cmp};
+use std::mem;
+use std::cmp;
 use std::io::Write;
-use std::fmt::Debug;
 use std::convert::{TryInto, TryFrom};
 use byteorder::{ByteOrder, NativeEndian, WriteBytesExt, LE};
-use fehler::throws;
+use fehler::{throws};
 
 type Error = std::io::Error;
 
@@ -23,6 +23,18 @@ pub trait EncoderTable {
 
     fn offset(&mut self, offset: usize);
 }
+
+#[derive(Clone)]
+pub struct U32Table {
+    dict: [u32; DICTIONARY_SIZE],
+    offset: usize,
+}
+impl Default for U32Table {
+    fn default() -> Self {
+        U32Table { dict: [0; DICTIONARY_SIZE], offset: 0 }
+    }
+}
+
 
 // on 64 bit systems, we read 64 bits and hash 5 bytes instead of 4
 #[cfg(target_pointer_width = "64")]
@@ -48,58 +60,43 @@ fn hash_for_u16(input: &[u8]) -> usize {
     (v.wrapping_mul(2654435761) >> (32 - HASHLOG - 1)) as usize // shift by one less than hashlog because we have twice as many slots
 }
 
-pub trait EncoderTableArray {
-    type Member: std::fmt::Debug + TryFrom<usize> + TryInto<usize>;
-    const MAX: usize;
-    
-    fn index(&mut self, key: &[u8]) -> &mut Self::Member;
-}
-
-#[derive(Clone)]
-pub struct U32Array([u32; DICTIONARY_SIZE]);
-impl Default for U32Array { fn default() -> Self { U32Array([0; DICTIONARY_SIZE]) } }
-impl EncoderTableArray for U32Array {
-    type Member = u32;
-    const MAX: usize = u32::MAX as usize;
-    fn index(&mut self, key: &[u8]) -> &mut u32 {
-        &mut self.0[hash_for_u32(key)]
-    }
-}
-
-#[derive(Clone)]
-pub struct U16Array([u16; DICTIONARY_SIZE * 2]); // can fit twice as many values into the same space (that's the entire point of using u16)
-impl Default for U16Array { fn default() -> Self { U16Array([0; DICTIONARY_SIZE * 2]) } }
-impl EncoderTableArray for U16Array {
-    type Member = u16;
-    const MAX: usize = u16::MAX as usize;
-    fn index(&mut self, key: &[u8]) -> &mut u16 {
-        &mut self.0[hash_for_u16(key)]
-    }
-}
-
-#[derive(Default, Clone)]
-pub struct EncoderHashtable<T: EncoderTableArray> {
-    dict: T,
-    offset: usize,
-}
-impl<T: EncoderTableArray> EncoderTable for EncoderHashtable<T>
-    where <T::Member as TryInto<usize>>::Error: Debug,
-          <T::Member as TryFrom<usize>>::Error: Debug {
+impl EncoderTable for U32Table {
     fn replace(&mut self, input: &[u8], offset: usize) -> usize {
         let o = offset + self.offset; // apply positive offset on input
 
         let mut value = o.try_into().expect("EncoderTable contract violated");
-        mem::swap(self.dict.index(&input[offset..]), &mut value);
-        value.try_into().expect("This code is not supposed to run on a 16-bit arch (let alone smaller)")
-            .saturating_sub(self.offset) // apply negative offset on output
+        mem::swap(&mut self.dict[hash_for_u32(&input[offset..])], &mut value);
+        usize::try_from(value).expect("This code is not supposed to run on a 16-bit arch (let alone smaller)")
+            .saturating_sub(self.offset)
+//            - self.offset // apply negative offset on output
     }
     fn offset(&mut self, offset: usize) {
         self.offset += offset;
     }
-    fn payload_size_limit() -> usize { T::MAX }
+    fn payload_size_limit() -> usize { u32::MAX as usize }
 }
-pub type U32Table = EncoderHashtable<U32Array>;
-pub type U16Table = EncoderHashtable<U16Array>;
+
+pub struct U16Table {
+    dict: [u16; DICTIONARY_SIZE*2], // u16 fits twice as many slots into the same amount of memory
+    offset: usize,
+}
+impl Default for U16Table {
+    fn default() -> Self {
+        U16Table { dict: [0; DICTIONARY_SIZE*2], offset: 0 }
+    }
+}
+impl EncoderTable for U16Table {
+    fn replace(&mut self, input: &[u8], offset: usize) -> usize {
+    unimplemented!();
+        let mut value = offset.try_into().expect("EncoderTable contract violated");
+        mem::swap(&mut self.dict[hash_for_u16(&input[offset..])], &mut value);
+        value.try_into().expect("This code is not supposed to run on an 8-bit arch either!")
+    }
+    fn offset(&mut self, offset: usize) {
+        self.offset += offset;
+    }
+    fn payload_size_limit() -> usize { u16::MAX as usize }
+}
 
 
 #[derive(Copy, Clone, Debug)]
