@@ -195,21 +195,28 @@ impl<'a> CompressionSettings<'a> {
             // 2. use a wrapper that forbids partial writes, so don't write 32-bit integers
             //    as four individual bytes with four individual range checks
             let mut cursor = NoPartialWrites(&mut out_buffer[..read_bytes]);
-            match compress2(&in_buffer, window_offset, &mut table, &mut cursor) {
+            let write = match compress2(&in_buffer, window_offset, &mut table, &mut cursor) {
                 Ok(()) => {
                     let not_written_len = cursor.0.len();
                     let written_len = read_bytes - not_written_len;
 //println!("{} -> {}", in_buffer.len(), written_len);
                     writer.write_u32::<LE>(written_len as u32)?;
-                    writer.write_all(&out_buffer[..written_len])?;
+                    &out_buffer[..written_len]
                 }
                 Err(e) => {
                     assert!(e.kind() == ErrorKind::ConnectionAborted);
                     // incompressible
 //println!("{} -> XXX", in_buffer.len());
                     writer.write_u32::<LE>((read_bytes as u32) | INCOMPRESSIBLE)?;
-                    writer.write_all(&in_buffer[..read_bytes])?;
+                    &in_buffer[..read_bytes]
                 }
+            };
+
+            writer.write_all(write)?;
+            if flags.contains(Flags::BlockChecksums) {
+                let mut block_hasher = XxHash32::with_seed(0);
+                block_hasher.write(write);
+                writer.write_u32::<LE>(block_hasher.finish() as u32)?;
             }
 
             if flags.contains(Flags::IndependentBlocks) {
