@@ -125,12 +125,11 @@ fn copy_overlapping(offset: usize, match_len: usize, prefix: &[u8], output: &mut
     Ok(())
 }
 
-/// Decompress all bytes of `input`.
-pub fn decompress(input: &[u8]) -> Result<Vec<u8>, Error> {
-    // Allocate a vector to contain the decompressed stream.
+#[throws]
+pub fn decompress(input: &[u8]) -> Vec<u8> {
     let mut vec = Vec::new();
     decompress_block(input, &[], &mut vec)?;
-    Ok(vec)
+    vec
 }
 
 #[cfg(test)]
