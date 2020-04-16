@@ -10,8 +10,9 @@ And the redox implementation (more on that below) is slower, in some cases subst
 
 Decompressor status: Beta. Works well, and is blazingly fast (at least as fast as the official C implementation in my tests).
 
-Compressor status: WIP. The example named "better.rs" should produce an lz4-compatible output file, but the compressor is still missing an entire API.
-Also the frame format is only implemented in the form of a constant header right now.
+Compressor status: Alpha.
+You can expect it to produce perfect (i.e. identical to what the C library produces) output for all configurations.
+The API may still change a little. The example named "dolz4" is a compressor but is currently lacking a CLI. You have to configure it by changing the code.
 Performance is good, but takes ~2-3x as long as the C implementation. The current bottleneck appears to be an abundance of range checks when writing output (~25% of cycles spent in there)
 which also cause the compiler to completely trip over itself and sometimes emit a sequence of copy_from_slice calls for 1-byte and 4-byte writes to the output array. Help wanted.
 
