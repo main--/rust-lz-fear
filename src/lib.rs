@@ -6,7 +6,7 @@ pub mod compress;
 
 use byteorder::{LE, ReadBytesExt, WriteBytesExt};
 use std::hash::Hasher;
-use std::io::{self, Read, BufRead, Write, Seek, Error as IoError, ErrorKind};
+use std::io::{self, Read, BufRead, Write, Seek, SeekFrom, Error as IoError, ErrorKind};
 use std::cmp;
 use std::mem;
 use std::convert::TryInto;
@@ -94,7 +94,29 @@ impl<'a> CompressionSettings<'a> {
     }
 
     #[throws(io::Error)]
-    pub fn compress<R: Read, W: Write>(&self, mut reader: R, mut writer: W) {
+    pub fn compress<R: Read, W: Write>(&self, reader: R, writer: W) {
+        self.compress_internal(reader, writer, None)?;
+    }
+
+    #[throws(io::Error)]
+    pub fn compress_with_size_unchecked<R: Read, W: Write>(&self, mut reader: R, mut writer: W, content_size: u64) {
+        self.compress_internal(reader, writer, Some(content_size))?;
+    }
+
+    #[throws(io::Error)]
+    pub fn compress_with_size<R: Read + Seek, W: Write>(&self, mut reader: R, writer: W) {
+        // maybe one day we can just use reader.stream_len() here: https://github.com/rust-lang/rust/issues/59359
+        // then again, we implement this to ignore the all bytes before the cursor which stream_len() does not
+        let start = reader.seek(SeekFrom::Current(0))?;
+        let end = reader.seek(SeekFrom::End(0))?;
+        reader.seek(SeekFrom::Start(start));
+
+        let length = end - start;
+        self.compress_internal(reader, writer, Some(length))?;
+    }
+
+    #[throws(io::Error)]
+    fn compress_internal<R: Read, W: Write>(&self, mut reader: R, mut writer: W, content_size: Option<u64>) {
         use crate::compress::{U32Table, compress2, EncoderTable};
 
         let mut content_hasher = None;
@@ -113,6 +135,9 @@ impl<'a> CompressionSettings<'a> {
         if self.dictionary.is_some() { // TODO FIXME
             flags |= Flags::DictionaryId;
         }
+        if content_size.is_some() {
+            flags |= Flags::ContentSize;
+        }
 
         let version = 1 << 6;
         let flag_byte = version | flags.bits();
@@ -124,7 +149,7 @@ impl<'a> CompressionSettings<'a> {
         header.write_u8(bd_byte)?;
         
         if flags.contains(Flags::ContentSize) {
-            // FIXME depends on seek
+            header.write_u64::<LE>(content_size.unwrap())?;
         }
 
         let mut template_table = U32Table::default();
@@ -206,9 +231,6 @@ impl<'a> CompressionSettings<'a> {
         if let Some(x) = content_hasher {
             writer.write_u32::<LE>(x.finish() as u32)?;
         }
-    }
-    pub fn compress_with_size<R: Read + Seek>(&self, reader: R) {
-//        reader.
     }
 }
 
