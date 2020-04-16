@@ -205,7 +205,7 @@ impl<'a> CompressionSettings<'a> {
             if read_bytes == 0 {
                 break;
             }
-
+            
             if let Some(x) = content_hasher.as_mut() {
                 x.write(&in_buffer[window_offset..]);
             }

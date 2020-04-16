@@ -67,8 +67,7 @@ impl EncoderTable for U32Table {
         let mut value = o.try_into().expect("EncoderTable contract violated");
         mem::swap(&mut self.dict[hash_for_u32(&input[offset..])], &mut value);
         usize::try_from(value).expect("This code is not supposed to run on a 16-bit arch (let alone smaller)")
-            .saturating_sub(self.offset)
-//            - self.offset // apply negative offset on output
+            .saturating_sub(self.offset) // apply negative offset on output
     }
     fn offset(&mut self, offset: usize) {
         self.offset += offset;
@@ -76,6 +75,7 @@ impl EncoderTable for U32Table {
     fn payload_size_limit() -> usize { u32::MAX as usize }
 }
 
+#[derive(Clone)]
 pub struct U16Table {
     dict: [u16; DICTIONARY_SIZE*2], // u16 fits twice as many slots into the same amount of memory
     offset: usize,
@@ -87,10 +87,12 @@ impl Default for U16Table {
 }
 impl EncoderTable for U16Table {
     fn replace(&mut self, input: &[u8], offset: usize) -> usize {
-    unimplemented!();
-        let mut value = offset.try_into().expect("EncoderTable contract violated");
+        let o = offset + self.offset; // apply positive offset on input
+
+        let mut value = o.try_into().expect("EncoderTable contract violated");
         mem::swap(&mut self.dict[hash_for_u16(&input[offset..])], &mut value);
-        value.try_into().expect("This code is not supposed to run on an 8-bit arch either!")
+        usize::try_from(value).expect("This code is not supposed to run on a 16-bit arch (let alone smaller)")
+            .saturating_sub(self.offset) // apply negative offset on output
     }
     fn offset(&mut self, offset: usize) {
         self.offset += offset;
