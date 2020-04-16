@@ -7,7 +7,7 @@ edition = "2018"
 description = "A fast pure-rust no-unsafe implementation of LZ4 compression and decompression"
 keywords = ["compression", "lz4", "compress", "decompression", "decompress"]
 categories = [ "algorithms", "compression", "encoding" ]
-#license = "MIT" license undecided
+license = "MIT"
 readme = "README.md"
 
 repository = "https://github.com/main--/rust-lz-fear"
@@ -17,7 +17,6 @@ byteorder = "1.3.1"
 twox-hash = "1.5.0"
 thiserror = "1.0"
 fehler = "1.0"
-cfg-if = "0.1.10"
 bitflags = "1.2.1"
 
 [dev-dependencies]
