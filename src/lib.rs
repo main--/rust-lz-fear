@@ -97,6 +97,8 @@ impl<'a> CompressionBuilder<'a> {
     pub fn compress<R: Read, W: Write>(&self, mut reader: R, mut writer: W) {
         use crate::compress::{U32Table, compress2, EncoderTable};
 
+        let mut content_hasher = None;
+
         let mut flags = Flags::empty();
         if self.independent_blocks {
             flags |= Flags::IndependentBlocks;
@@ -106,6 +108,7 @@ impl<'a> CompressionBuilder<'a> {
         }
         if self.content_checksum {
             flags |= Flags::ContentChecksum;
+            content_hasher = Some(XxHash32::with_seed(0));
         }
         if self.dictionary.is_some() { // TODO FIXME
             flags |= Flags::DictionaryId;
@@ -157,6 +160,10 @@ impl<'a> CompressionBuilder<'a> {
                 break;
             }
 
+            if let Some(x) = content_hasher.as_mut() {
+                x.write(&in_buffer[window_offset..]);
+            }
+
             // TODO: implement u16 table for small inputs
 
             // 1. limit output by input size so we never have negative compression ratio
@@ -195,6 +202,10 @@ impl<'a> CompressionBuilder<'a> {
             }
         }
         writer.write_u32::<LE>(0)?;
+
+        if let Some(x) = content_hasher {
+            writer.write_u32::<LE>(x.finish() as u32)?;
+        }
     }
     pub fn compress_with_size<R: Read + Seek>(&self, reader: R) {
 //        reader.
