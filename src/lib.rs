@@ -56,7 +56,8 @@ pub struct CompressionSettings<'a> {
     block_checksums: bool,
     content_checksum: bool,
     block_size: usize,
-    dictionary: Option<(u32, &'a [u8])>,
+    dictionary: Option<&'a [u8]>,
+    dictionary_id: Option<u32>,
 }
 impl<'a> Default for CompressionSettings<'a> {
     fn default() -> Self {
@@ -66,6 +67,7 @@ impl<'a> Default for CompressionSettings<'a> {
             content_checksum: true,
             block_size: 4 * 1024 * 1024,
             dictionary: None,
+            dictionary_id: None,
         }
     }
 }
@@ -89,7 +91,24 @@ impl<'a> CompressionSettings<'a> {
         self
     }
     pub fn dictionary(&mut self, id: u32, dict: &'a [u8]) -> &mut Self {
-        self.dictionary = Some((id, dict));
+        self.dictionary_id = Some(id);
+        self.dictionary = Some(dict);
+        self
+    }
+
+    /// The dictionary id header field is quite obviously intended to tell anyone trying to decompress your frame which dictionary to use.
+    /// So it is only natural to assume that the *absence* of a dictionary id indicates that no dictionary was used.
+    ///
+    /// Unfortunately this assumption turns out to be incorrect. The LZ4 CLI simply never writes a dictionary id.
+    /// The major downside is that you can no longer distinguish corrupted data from a missing dictionary
+    /// (unless you write block checksums, which the LZ4 CLI also never does).
+    ///
+    /// Hence, this library is opinionated in the sense that we always want you to specify either neither or both of these things
+    /// (the LZ4 CLI basically just ignores the dictionary id completely and only cares about whether you specify a dictionary parameter or not).
+    ///
+    /// If you think you know better (you probably don't) you may use this method to break this rule.
+    pub fn dictionary_id_nonsense_override(&mut self, id: Option<u32>) -> &mut Self {
+        self.dictionary_id = id;
         self
     }
 
@@ -132,7 +151,7 @@ impl<'a> CompressionSettings<'a> {
             flags |= Flags::ContentChecksum;
             content_hasher = Some(XxHash32::with_seed(0));
         }
-        if self.dictionary.is_some() { // TODO FIXME
+        if self.dictionary_id.is_some() { // TODO FIXME
             flags |= Flags::DictionaryId;
         }
         if content_size.is_some() {
@@ -151,22 +170,24 @@ impl<'a> CompressionSettings<'a> {
         if flags.contains(Flags::ContentSize) {
             header.write_u64::<LE>(content_size.unwrap())?;
         }
-
-        let mut template_table = U32Table::default();
-        let mut block_initializer: &[u8] = &[];
-        if let Some((id, dict)) = self.dictionary {
-//            header.write_u32::<LE>(id)?;
-
-            compress2(dict, 0, &mut template_table, io::sink()).unwrap();
-//            template_table.offset(dict.len());
-            block_initializer = dict;
-            println!("foo");
+        if let Some(id) = self.dictionary_id {
+            header.write_u32::<LE>(id);
         }
 
         let mut hasher = XxHash32::with_seed(0);
         hasher.write(&header[4..]); // skip magic for header checksum
         header.write_u8((hasher.finish() >> 8) as u8)?;
         writer.write_all(&header)?;
+
+        let mut template_table = U32Table::default();
+        let mut block_initializer: &[u8] = &[];
+        if let Some(dict) = self.dictionary {
+            for window in dict.windows(std::mem::size_of::<usize>()).step_by(3) {
+                template_table.replace(dict, window.as_ptr() as usize - dict.as_ptr() as usize);
+            }
+
+            block_initializer = dict;
+        }
 
         // TODO: when doing dependent blocks or dictionaries, in_buffer's capacity is insufficient
         let mut in_buffer = Vec::with_capacity(self.block_size);
@@ -179,7 +200,7 @@ impl<'a> CompressionSettings<'a> {
             // We basically want read_exact semantics, except at the end.
             // Sadly read_exact specifies the buffer contents to be undefined
             // on error, so we have to use this construction instead.
-            reader.by_ref().take(in_buffer.capacity() as u64).read_to_end(&mut in_buffer)?;
+            reader.by_ref().take(self.block_size as u64).read_to_end(&mut in_buffer)?;
             let read_bytes = in_buffer.len() - window_offset;
             if read_bytes == 0 {
                 break;
