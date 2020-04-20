@@ -12,7 +12,7 @@ use super::header::{self, Flags, BlockDescriptor};
 use crate::raw::decompress as raw;
 
 
-/// Errors when decompressiong an LZ4 frame.
+/// Errors when decompressing an LZ4 frame.
 #[derive(Error, Debug)]
 pub enum DecompressionError {
     #[error("error reading from the input you gave me")]

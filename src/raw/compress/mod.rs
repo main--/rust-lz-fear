@@ -42,7 +42,7 @@ fn hash_for_u32(input: &[u8]) -> usize {
     // read 64 bits if possible
     let v = input.get(..8).map(NativeEndian::read_u64).unwrap_or(0);
     // we end up only needing 5 bytes but the only case where this becomes
-    // zero is at the very end, where we're not allowed to produce matches anyways (see below)
+    // zero is at the very end, where we're not allowed to produce matches anyway (see below)
 
     // calculate a bad but very cheap checksum
     #[cfg(target_endian = "little")] fn checksum_u64(v: u64) -> u64 { (v << 24).wrapping_mul(889523592379) }

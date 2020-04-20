@@ -50,13 +50,15 @@ impl Flags {
 
 pub struct BlockDescriptor(pub u8); // ??? or what else could "BD" stand for ???
 impl BlockDescriptor {
-//    #[throws]
-    pub fn new(block_maxsize: usize) -> Self {
+    pub fn new(block_maxsize: usize) -> Option<Self> {
         let maybe_maxsize = ((block_maxsize.trailing_zeros().saturating_sub(8)) / 2) as u8;
         let bd = BlockDescriptor::parse(maybe_maxsize << 4).unwrap();
-        assert_eq!(block_maxsize, bd.block_maxsize().unwrap());
+        match bd.block_maxsize() {
+            Ok(x) if x == block_maxsize => (),
+            _ => return None,
+        }
 
-        bd
+        Some(bd)
     }
 
     #[throws(ParseError)]

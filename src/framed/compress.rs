@@ -4,12 +4,24 @@ use std::io::{self, Read, Write, Seek, SeekFrom, ErrorKind};
 use std::mem;
 use twox_hash::XxHash32;
 use thiserror::Error;
-use fehler::{throw, throws};
+use fehler::{throws};
 
 use super::{MAGIC, INCOMPRESSIBLE, WINDOW_SIZE};
 use super::header::{Flags, BlockDescriptor};
 use crate::raw::compress::{U32Table, compress2, EncoderTable};
 
+
+/// Errors when compressing an LZ4 frame.
+#[derive(Error, Debug)]
+pub enum CompressionError {
+    #[error("error reading from the input you gave me")]
+    ReadError(io::Error),
+    #[error("error writing to the output you gave me")]
+    WriteError(#[from] io::Error),
+    #[error("the block size you asked for is not supported")]
+    InvalidBlockSize,
+}
+type Error = CompressionError; // do it this way for better docs
 
 pub struct CompressionSettings<'a> {
     independent_blocks: bool,
@@ -72,17 +84,17 @@ impl<'a> CompressionSettings<'a> {
         self
     }
 
-    #[throws(io::Error)]
+    #[throws]
     pub fn compress<R: Read, W: Write>(&self, reader: R, writer: W) {
         self.compress_internal(reader, writer, None)?;
     }
 
-    #[throws(io::Error)]
+    #[throws]
     pub fn compress_with_size_unchecked<R: Read, W: Write>(&self, reader: R, writer: W, content_size: u64) {
         self.compress_internal(reader, writer, Some(content_size))?;
     }
 
-    #[throws(io::Error)]
+    #[throws]
     pub fn compress_with_size<R: Read + Seek, W: Write>(&self, mut reader: R, writer: W) {
         // maybe one day we can just use reader.stream_len() here: https://github.com/rust-lang/rust/issues/59359
         // then again, we implement this to ignore the all bytes before the cursor which stream_len() does not
@@ -94,7 +106,7 @@ impl<'a> CompressionSettings<'a> {
         self.compress_internal(reader, writer, Some(length))?;
     }
 
-    #[throws(io::Error)]
+    #[throws]
     fn compress_internal<R: Read, W: Write>(&self, mut reader: R, mut writer: W, content_size: Option<u64>) {
         let mut content_hasher = None;
 
@@ -109,7 +121,7 @@ impl<'a> CompressionSettings<'a> {
             flags |= Flags::ContentChecksum;
             content_hasher = Some(XxHash32::with_seed(0));
         }
-        if self.dictionary_id.is_some() { // TODO FIXME
+        if self.dictionary_id.is_some() {
             flags |= Flags::DictionaryId;
         }
         if content_size.is_some() {
@@ -118,15 +130,15 @@ impl<'a> CompressionSettings<'a> {
 
         let version = 1 << 6;
         let flag_byte = version | flags.bits();
-        let bd_byte = BlockDescriptor::new(self.block_size).0;
+        let bd_byte = BlockDescriptor::new(self.block_size).ok_or(Error::InvalidBlockSize)?.0;
 
         let mut header = Vec::new();
         header.write_u32::<LE>(MAGIC)?;
         header.write_u8(flag_byte)?;
         header.write_u8(bd_byte)?;
         
-        if flags.contains(Flags::ContentSize) {
-            header.write_u64::<LE>(content_size.unwrap())?;
+        if let Some(content_size) = content_size {
+            header.write_u64::<LE>(content_size)?;
         }
         if let Some(id) = self.dictionary_id {
             header.write_u32::<LE>(id)?;
@@ -158,7 +170,7 @@ impl<'a> CompressionSettings<'a> {
             // We basically want read_exact semantics, except at the end.
             // Sadly read_exact specifies the buffer contents to be undefined
             // on error, so we have to use this construction instead.
-            reader.by_ref().take(self.block_size as u64).read_to_end(&mut in_buffer)?;
+            reader.by_ref().take(self.block_size as u64).read_to_end(&mut in_buffer).map_err(Error::ReadError)?;
             let read_bytes = in_buffer.len() - window_offset;
             if read_bytes == 0 {
                 break;
@@ -218,6 +230,15 @@ impl<'a> CompressionSettings<'a> {
     }
 }
 
+/// Helper struct to allow more efficient code generation when using the Write trait on byte buffers.
+///
+/// The underlying problem is that the Write impl on [u8] (and everything similar, e.g. Cursor<[u8]>)
+/// is specified to write as many bytes as possible before returning an error.
+/// This is a problem because it forces e.g. a 32-bit write to compile to four 8-bit writes with a range
+/// check every time, rather than a single 32-bit write with a range check.
+///
+/// This wrapper aims to resolve the problem by simply not writing anything in case we fail the bounds check,
+/// as we throw away the entire buffer in that case anyway.
 struct NoPartialWrites<'a>(&'a mut [u8]);
 impl<'a> Write for NoPartialWrites<'a> {
     #[inline]
