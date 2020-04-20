@@ -1,15 +1,9 @@
 #![forbid(unsafe_code)]
 
-pub mod decompress;
-pub mod compress;
-mod header;
+pub mod raw;
+pub mod framed;
 
-pub use decompress::LZ4FrameReader;
-
-
-const MAGIC: u32 = 0x184D2204;
-const INCOMPRESSIBLE: u32 = 1 << 31;
-const WINDOW_SIZE: usize = 64 * 1024;
+pub use framed::LZ4FrameReader;
 
 
 
@@ -17,15 +11,15 @@ const WINDOW_SIZE: usize = 64 * 1024;
 #[cfg(test)]
 mod tests {
     use std::str;
-    use crate::compress::compress2;
-    use crate::decompress::decompress;
+    use crate::raw::compress2;
+    use crate::raw::decompress;
     
     fn compress(input: &[u8]) -> Vec<u8> {
         let mut buf = Vec::new();
         if input.len() <= 0xFFFF {
-            compress2::<_, crate::compress::U16Table>(input, &mut buf).unwrap();
+            compress2::<_, crate::raw::U16Table>(input, &mut buf).unwrap();
         } else {
-            compress2::<_, crate::compress::U32Table>(input, &mut buf).unwrap();
+            compress2::<_, crate::raw::U32Table>(input, &mut buf).unwrap();
         }
         buf
     }

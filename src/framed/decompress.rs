@@ -7,9 +7,9 @@ use twox_hash::XxHash32;
 use thiserror::Error;
 use fehler::{throw, throws};
 
-use crate::{MAGIC, INCOMPRESSIBLE, WINDOW_SIZE};
-use crate::header::{self, Flags, BlockDescriptor};
-use super::raw;
+use super::{MAGIC, INCOMPRESSIBLE, WINDOW_SIZE};
+use super::header::{self, Flags, BlockDescriptor};
+use crate::raw::decompress as raw;
 
 
 /// Errors when decompressiong an LZ4 frame.

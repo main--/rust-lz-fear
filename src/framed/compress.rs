@@ -6,9 +6,9 @@ use twox_hash::XxHash32;
 use thiserror::Error;
 use fehler::{throw, throws};
 
-use crate::{MAGIC, INCOMPRESSIBLE, WINDOW_SIZE};
-use crate::header::{Flags, BlockDescriptor};
-use super::raw::{U32Table, compress2, EncoderTable};
+use super::{MAGIC, INCOMPRESSIBLE, WINDOW_SIZE};
+use super::header::{Flags, BlockDescriptor};
+use crate::raw::compress::{U32Table, compress2, EncoderTable};
 
 
 pub struct CompressionSettings<'a> {
