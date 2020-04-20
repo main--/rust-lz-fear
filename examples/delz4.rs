@@ -1,4 +1,4 @@
-use lz4_compression::LZ4FrameReader;
+use lz_fear::framed::LZ4FrameReader;
 use std::fs::File;
 use std::io::{self, BufRead, Write};
 use std::env;

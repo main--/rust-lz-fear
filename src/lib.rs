@@ -12,14 +12,14 @@ pub use framed::LZ4FrameReader;
 mod tests {
     use std::str;
     use crate::raw::compress2;
-    use crate::raw::decompress;
-    
+    use crate::raw::decompress_raw_block as decompress;
+
     fn compress(input: &[u8]) -> Vec<u8> {
         let mut buf = Vec::new();
         if input.len() <= 0xFFFF {
-            compress2::<_, crate::raw::U16Table>(input, &mut buf).unwrap();
+            compress2(input, 0, &mut crate::raw::U16Table::default(), &mut buf).unwrap();
         } else {
-            compress2::<_, crate::raw::U32Table>(input, &mut buf).unwrap();
+            compress2(input, 0, &mut crate::raw::U32Table::default(), &mut buf).unwrap();
         }
         buf
     }

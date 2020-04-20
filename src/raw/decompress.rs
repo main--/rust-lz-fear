@@ -138,7 +138,7 @@ pub fn decompress_raw_block(input: &[u8]) -> Vec<u8> {
 
 #[cfg(test)]
 mod test {
-    use super::*;
+    use super::decompress_raw_block as decompress;
 
     #[test]
     fn aaaaaaaaaaa_lots_of_aaaaaaaaa() {

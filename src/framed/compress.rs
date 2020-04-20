@@ -22,6 +22,11 @@ pub enum CompressionError {
     InvalidBlockSize,
 }
 type Error = CompressionError; // do it this way for better docs
+impl From<Error> for io::Error {
+    fn from(e: Error) -> io::Error {
+        io::Error::new(ErrorKind::Other, e)
+    }
+}
 
 pub struct CompressionSettings<'a> {
     independent_blocks: bool,

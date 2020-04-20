@@ -1,4 +1,4 @@
-use lz_fear::compress::framed::CompressionSettings;
+use lz_fear::framed::CompressionSettings;
 use std::fs::File;
 use std::{io, env};
 use fehler::throws;
