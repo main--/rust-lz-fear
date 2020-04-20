@@ -157,8 +157,12 @@ impl<'a> CompressionSettings<'a> {
         let mut template_table = U32Table::default();
         let mut block_initializer: &[u8] = &[];
         if let Some(dict) = self.dictionary {
-            for window in dict.windows(std::mem::size_of::<usize>()).step_by(3) {
-                template_table.replace(dict, window.as_ptr() as usize - dict.as_ptr() as usize);
+            for window in dict.windows(mem::size_of::<usize>()).step_by(3) {
+                // this is a perfectly safe way to find out where our window is pointing
+                // we could do this manually by iterating with an index to avoid the scary-looking
+                // pointer math but this is way more convenient IMO
+                let offset = window.as_ptr() as usize - dict.as_ptr() as usize;
+                template_table.replace(dict, offset);
             }
 
             block_initializer = dict;
