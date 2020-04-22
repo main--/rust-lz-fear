@@ -166,6 +166,7 @@ fn write_group<W: Write>(mut writer: &mut W, literal: &[u8], duplicate: Duplicat
 pub fn compress2<W: Write, T: EncoderTable>(input: &[u8], cursor: usize, table: &mut T, mut writer: W) {
     assert!(input.len() <= T::payload_size_limit());
 
+    let init_cursor = cursor;
     let mut cursor = cursor;
     while cursor < input.len() {
         let literal_start = cursor;
@@ -194,7 +195,9 @@ pub fn compress2<W: Write, T: EncoderTable>(input: &[u8], cursor: usize, table: 
             let current_batch = &input[cursor..(input.len() - 5)];
             let candidate = table.replace(input, cursor);
 
-            if (cursor != 0) // can never match on the very first byte
+            // NB: for correctness, only comparing to 0 is needed here (gives better compression ratio when using dependent blocks)
+            //     however the reference implementation strictly enforces this and we strive for byte-perfect output
+            if (cursor != init_cursor) // can never match on the very first byte
                 && cursor - candidate <= 0xFFFF { // must be an addressable offset
                 // let's see how many matching bytes we have
                 let candidate_batch = &input[candidate..];

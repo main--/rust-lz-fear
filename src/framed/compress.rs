@@ -206,7 +206,7 @@ impl<'a> CompressionSettings<'a> {
                     assert!(e.kind() == ErrorKind::ConnectionAborted);
                     // incompressible
                     writer.write_u32::<LE>((read_bytes as u32) | INCOMPRESSIBLE)?;
-                    &in_buffer[..read_bytes]
+                    &in_buffer[window_offset..]
                 }
             };
 
