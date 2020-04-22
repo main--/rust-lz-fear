@@ -208,7 +208,7 @@ pub fn compress2<W: Write, T: EncoderTable>(input: &[u8], cursor: usize, table: 
                     let offset = (cursor - candidate) as u16;
 
                     // backtrack
-                    let max_backtrack = cmp::min(cursor - literal_start, (u16::MAX - offset) as usize);
+                    let max_backtrack = cursor - literal_start;
                     let backtrack = input[..cursor].iter().rev().zip(input[..candidate].iter().rev()).take(max_backtrack).take_while(|&(a, b)| a == b).count();
                     // offset remains unchanged
                     extra_bytes += backtrack;
