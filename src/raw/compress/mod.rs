@@ -175,7 +175,7 @@ pub fn compress2<W: Write, T: EncoderTable>(input: &[u8], cursor: usize, table: 
         let mut step = 1;
         // look for a duplicate
         let duplicate = loop {
-            if input.len().saturating_sub(cursor) < 13 {
+            if input.len().saturating_sub(cursor) < 12 {
                 // end with a literal-only section
                 // the limit of 13 bytes is somewhat arbitrarily chosen by the spec (our decoder doesn't need it)
                 // probably to allow some insane decoder optimization they do in C
