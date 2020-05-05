@@ -12,6 +12,8 @@ Decompressor status: Beta. Works well, and is blazingly fast (at least as fast a
 
 Compressor status: Alpha.
 You can expect it to produce perfect (i.e. identical to what the C library produces) output for all configurations.
+Non-default block sizes are an exception here, not entirely sure what the problem is. Dictionary is also implemented slightly differently right now.
+There is one other unknown edge case where output differs slightly. Note that all of these cases still produce valid and correct output, they just encode slightly differently than the C implementation (compression ration may be slightly worse in these cases).
 The API may still change a little. The example named "dolz4" is a compressor but is currently lacking a CLI. You have to configure it by changing the code.
 Performance is good, but takes ~2-3x as long as the C implementation. The current bottleneck appears to be an abundance of range checks when writing output (~25% of cycles spent in there)
 which also cause the compiler to completely trip over itself and sometimes emit a sequence of copy_from_slice calls for 1-byte and 4-byte writes to the output array. Help wanted.
