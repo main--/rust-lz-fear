@@ -8,7 +8,7 @@ use fehler::{throws};
 
 use super::{MAGIC, INCOMPRESSIBLE, WINDOW_SIZE};
 use super::header::{Flags, BlockDescriptor};
-use crate::raw::compress::{U32Table, compress2, EncoderTable};
+use crate::raw::{U32Table, OffsetTable, compress2, EncoderTable};
 
 
 /// Errors when compressing an LZ4 frame.
@@ -154,7 +154,7 @@ impl<'a> CompressionSettings<'a> {
         header.write_u8((hasher.finish() >> 8) as u8)?;
         writer.write_all(&header)?;
 
-        let mut template_table = U32Table::default();
+        let mut template_table = OffsetTable::<U32Table>::default();
         let mut block_initializer: &[u8] = &[];
         if let Some(dict) = self.dictionary {
             for window in dict.windows(mem::size_of::<usize>()).step_by(3) {
@@ -191,14 +191,16 @@ impl<'a> CompressionSettings<'a> {
 
             // TODO: implement u16 table for small inputs
 
+            table.set_prefix(window_offset);
+
             // 1. limit output by input size so we never have negative compression ratio
             // 2. use a wrapper that forbids partial writes, so don't write 32-bit integers
             //    as four individual bytes with four individual range checks
-            let mut cursor = NoPartialWrites(&mut out_buffer[..read_bytes]);
-            let write = match compress2(&in_buffer, window_offset, &mut table, &mut cursor) {
+            let mut cursor = NoPartialWrites(&mut out_buffer/*[..read_bytes]*/);
+            let write = match compress2(&in_buffer[window_offset..], &in_buffer[..window_offset], &mut table, &mut cursor) {
                 Ok(()) => {
                     let not_written_len = cursor.0.len();
-                    let written_len = read_bytes - not_written_len;
+                    let written_len = /*read_bytes*/out_buffer.len() - not_written_len;
                     writer.write_u32::<LE>(written_len as u32)?;
                     &out_buffer[..written_len]
                 }

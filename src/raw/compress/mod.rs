@@ -16,22 +16,54 @@ const HASHLOG: usize = 12;
 const MINMATCH: usize = 4;
 
 
-pub trait EncoderTable {
+pub trait EncoderTable: Default {
     fn payload_size_limit() -> usize;
     // offset is declared as usize but must not be above payload_size_limit
     fn replace(&mut self, input: &[u8], offset: usize) -> usize;
-
-    fn offset(&mut self, offset: usize);
 }
+
+
+
+pub enum TableLookupResult {
+    Current(usize),
+    Prefix(usize),
+    Forgotten,
+}
+
+
+#[derive(Clone, Default)]
+pub struct OffsetTable<T> {
+    table: Box<T>,
+    forgotten: usize,
+    prefix: usize,
+}
+impl<T: EncoderTable> OffsetTable<T> {
+    pub fn replace(&mut self, input: &[u8], offset: usize) -> TableLookupResult {
+        let previous = self.table.replace(&input[offset..], offset + self.forgotten + self.prefix);
+        match previous.checked_sub(self.forgotten) {
+            None => TableLookupResult::Forgotten,
+            Some(x) => match x.checked_sub(self.prefix) {
+                None => TableLookupResult::Prefix(x),
+                Some(y) => TableLookupResult::Current(y),
+            },
+        }
+    }
+    pub fn offset(&mut self, o: usize) {
+        self.forgotten += o;
+    }
+    pub fn set_prefix(&mut self, o: usize) {
+        self.prefix = o;
+    }
+}
+
 
 #[derive(Clone)]
 pub struct U32Table {
     dict: [u32; DICTIONARY_SIZE],
-    offset: usize,
 }
 impl Default for U32Table {
     fn default() -> Self {
-        U32Table { dict: [0; DICTIONARY_SIZE], offset: 0 }
+        U32Table { dict: [0; DICTIONARY_SIZE] }
     }
 }
 
@@ -62,15 +94,9 @@ fn hash_for_u16(input: &[u8]) -> usize {
 
 impl EncoderTable for U32Table {
     fn replace(&mut self, input: &[u8], offset: usize) -> usize {
-        let o = offset + self.offset; // apply positive offset on input
-
-        let mut value = o.try_into().expect("EncoderTable contract violated");
-        mem::swap(&mut self.dict[hash_for_u32(&input[offset..])], &mut value);
+        let mut value = offset.try_into().expect("EncoderTable contract violated");
+        mem::swap(&mut self.dict[hash_for_u32(input)], &mut value);
         usize::try_from(value).expect("This code is not supposed to run on a 16-bit arch (let alone smaller)")
-            .saturating_sub(self.offset) // apply negative offset on output
-    }
-    fn offset(&mut self, offset: usize) {
-        self.offset += offset;
     }
     fn payload_size_limit() -> usize { u32::MAX as usize }
 }
@@ -78,24 +104,17 @@ impl EncoderTable for U32Table {
 #[derive(Clone)]
 pub struct U16Table {
     dict: [u16; DICTIONARY_SIZE*2], // u16 fits twice as many slots into the same amount of memory
-    offset: usize,
 }
 impl Default for U16Table {
     fn default() -> Self {
-        U16Table { dict: [0; DICTIONARY_SIZE*2], offset: 0 }
+        U16Table { dict: [0; DICTIONARY_SIZE*2] }
     }
 }
 impl EncoderTable for U16Table {
     fn replace(&mut self, input: &[u8], offset: usize) -> usize {
-        let o = offset + self.offset; // apply positive offset on input
-
-        let mut value = o.try_into().expect("EncoderTable contract violated");
-        mem::swap(&mut self.dict[hash_for_u16(&input[offset..])], &mut value);
+        let mut value = offset.try_into().expect("EncoderTable contract violated");
+        mem::swap(&mut self.dict[hash_for_u16(input)], &mut value);
         usize::try_from(value).expect("This code is not supposed to run on a 16-bit arch (let alone smaller)")
-            .saturating_sub(self.offset) // apply negative offset on output
-    }
-    fn offset(&mut self, offset: usize) {
-        self.offset += offset;
     }
     fn payload_size_limit() -> usize { u16::MAX as usize }
 }
@@ -119,7 +138,7 @@ fn count_matching_bytes(a: &[u8], b: &[u8]) -> usize {
     fn read_usize(b: &[u8]) -> usize { // sadly byteorder doesn't have this
         let mut buf = [0u8; REGSIZE];
         buf.copy_from_slice(&b[..REGSIZE]);
-        usize::from_le_bytes(buf)
+        usize::from_ne_bytes(buf)
     }
     #[cfg(target_endian = "little")] fn archdep_zeros(i: usize) -> u32 { i.trailing_zeros() }
     #[cfg(target_endian = "big")] fn archdep_zeros(i: usize) -> u32 { i.leading_zeros() }
@@ -149,25 +168,24 @@ const SKIP_TRIGGER: usize = 6; // for each 64 steps, skip in bigger increments
 
 #[throws]
 fn write_group<W: Write>(mut writer: &mut W, literal: &[u8], duplicate: Duplicate) {
-        let literal_len = literal.len();
+    let literal_len = literal.len();
 
-        let mut token = 0;
-        write_lsic_head(&mut token, 4, literal_len);
-        write_lsic_head(&mut token, 0, duplicate.extra_bytes);
+    let mut token = 0;
+    write_lsic_head(&mut token, 4, literal_len);
+    write_lsic_head(&mut token, 0, duplicate.extra_bytes);
 
-        writer.write_u8(token)?;
-        write_lsic_tail(&mut writer, literal_len)?;
-        writer.write_all(literal)?;
-        writer.write_u16::<LE>(duplicate.offset)?;
-        write_lsic_tail(&mut writer, duplicate.extra_bytes)?;
+    writer.write_u8(token)?;
+    write_lsic_tail(&mut writer, literal_len)?;
+    writer.write_all(literal)?;
+    writer.write_u16::<LE>(duplicate.offset)?;
+    write_lsic_tail(&mut writer, duplicate.extra_bytes)?;
 }
 
 #[throws]
-pub fn compress2<W: Write, T: EncoderTable>(input: &[u8], cursor: usize, table: &mut T, mut writer: W) {
+pub fn compress2<W: Write, T: EncoderTable>(input: &[u8], prefix: &[u8], table: &mut OffsetTable<T>, mut writer: W) {
     assert!(input.len() <= T::payload_size_limit());
 
-    let init_cursor = cursor;
-    let mut cursor = cursor;
+    let mut cursor = 0;
     while cursor < input.len() {
         let literal_start = cursor;
 
@@ -177,7 +195,7 @@ pub fn compress2<W: Write, T: EncoderTable>(input: &[u8], cursor: usize, table: 
         let duplicate = loop {
             if input.len().saturating_sub(cursor) < 12 {
                 // end with a literal-only section
-                // the limit of 13 bytes is somewhat arbitrarily chosen by the spec (our decoder doesn't need it)
+                // the limit of ~~13~~12 bytes is somewhat arbitrarily chosen by the spec (our decoder doesn't need it)
                 // probably to allow some insane decoder optimization they do in C
                 let literal_len = input.len() - literal_start;
                 
@@ -193,11 +211,49 @@ pub fn compress2<W: Write, T: EncoderTable>(input: &[u8], cursor: usize, table: 
             // we have to chop off the last five bytes though because the spec also (completely arbitrarily, I must say)
             // requires these to be encoded as literals (once again, our decoder does not require this)
             let current_batch = &input[cursor..(input.len() - 5)];
-            let candidate = table.replace(input, cursor);
+            match table.replace(input, cursor) {
+            TableLookupResult::Forgotten => (), // sad life
+            TableLookupResult::Prefix(candidate) => {
+//            unimplemented!();
+if let Ok(offset) = u16::try_from(cursor + prefix.len() - candidate) {
 
-            // NB: for correctness, only comparing to 0 is needed here (gives better compression ratio when using dependent blocks)
+            if cursor != 0 {
+            let cand = &prefix[candidate..];
+            let matching = count_matching_bytes(current_batch, cand);
+            if let Some(mut extra_bytes) = matching.checked_sub(MINMATCH) {
+            
+            // TODO backtrack
+                    // backtrack
+                    let max_backtrack = cursor - literal_start;
+                    let backtrack = input[..cursor].iter().rev().zip(prefix[..candidate].iter().rev()).take(max_backtrack).take_while(|&(a, b)| a == b).count();
+                    // offset remains unchanged
+                    extra_bytes += backtrack;
+
+                    if matching == cand.len() {
+                    let forward_match = count_matching_bytes(&current_batch[matching..], input);
+
+                    cursor += forward_match;
+                    extra_bytes += forward_match;
+                    }
+
+
+            cursor += matching;
+            table.replace(input, cursor - 2);
+            break Duplicate { offset, extra_bytes };
+            
+            }
+            }
+            }
+            
+//            unimplemented!();
+            }
+            TableLookupResult::Current(candidate) => {
+
+if let Ok(offset) = u16::try_from(cursor - candidate) {
+
+            // NB: for correctness, this is not really needed if there is a prefix (gives better compression ratio when using dependent blocks)
             //     however the reference implementation strictly enforces this and we strive for byte-perfect output
-            if (cursor != init_cursor) // can never match on the very first byte
+            if ((cursor != 0) || (prefix.len() != 0)) // can never match on the very first byte
                 && cursor - candidate <= 0xFFFF { // must be an addressable offset
                 // let's see how many matching bytes we have
                 let candidate_batch = &input[candidate..];
@@ -205,7 +261,7 @@ pub fn compress2<W: Write, T: EncoderTable>(input: &[u8], cursor: usize, table: 
 
                 if let Some(mut extra_bytes) = matching_bytes.checked_sub(MINMATCH) {
                     // if it wasn't, this was just a hash collision :(
-                    let offset = (cursor - candidate) as u16;
+                    //let offset = (cursor - candidate) as u16;
 
                     // backtrack
                     let max_backtrack = cursor - literal_start;
@@ -218,8 +274,11 @@ pub fn compress2<W: Write, T: EncoderTable>(input: &[u8], cursor: usize, table: 
                     table.replace(input, cursor - 2);
         
                     break Duplicate { offset, extra_bytes };
-                }
+                }// else { println!("hashfail"); }
             }
+}
+}
+}
             
             // no match, keep looping
             cursor += step;
