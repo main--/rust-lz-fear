@@ -98,11 +98,12 @@ impl<R: Read> LZ4FrameReader<R> {
             throw!(Error::WrongMagic(magic));
         }
 
-        let flags = Flags::parse(reader.read_u8()?)?;
+        let flags_byte = reader.read_u8()?;
+        let flags = Flags::parse(flags_byte)?;
         let bd = BlockDescriptor::parse(reader.read_u8()?)?;
 
         let mut hasher = XxHash32::with_seed(0);
-        hasher.write_u8(flags.bits());
+        hasher.write_u8(flags_byte);
         hasher.write_u8(bd.0);
 
         let content_size = if flags.content_size() {
