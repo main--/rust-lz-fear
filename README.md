@@ -25,3 +25,17 @@ However after noticing performance issues, I have gradually rewritten both the c
 C implementation (and that's just the raw format without framing!). Admittedly they pack plenty of optimizations in there (lots of intentionally reading beyond buffer boundaries for the sake of performance),
 but I'm proud to say that I achieved similar performance in just 400 lines of competely safe Rust.
 
+# Code Fuzzing
+
+Fuzzing requires a nightly toolchain. Fuzzing for this project is currently confirmed to work with:
+
+```
+rustc 1.44.0-nightly (f509b26a7 2020-03-18)
+```
+
+## Running
+
+```
+cargo install cargo-fuzz
+cargo +nightly fuzz run roundtrip_fuzz
+```
