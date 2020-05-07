@@ -19,5 +19,5 @@ fuzz_target!(|data: &[u8]| {
 
     let mut roundtripped = Vec::new();
     lz4_reader.read_to_end(&mut roundtripped).expect("Could not read decompressed data");
-    assert!(roundtripped.iter().eq(data));
+    assert!(roundtripped.as_slice() == data);
 });
