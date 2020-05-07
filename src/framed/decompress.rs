@@ -207,7 +207,7 @@ impl<R: Read> LZ4FrameReader<R> {
 
         if is_compressed {
             if let Some(window) = self.carryover_window.as_mut() {
-                raw::decompress_raw(&buf, &window, output)?;
+                raw::decompress_raw(&buf, &window, output, self.block_maxsize)?;
 
                 let outlen = output.len();
                 if outlen < WINDOW_SIZE {
@@ -221,7 +221,7 @@ impl<R: Read> LZ4FrameReader<R> {
 
                 assert!(window.len() <= WINDOW_SIZE);
             } else {
-                raw::decompress_raw(&buf, &[], output)?;
+                raw::decompress_raw(&buf, &[], output, self.block_maxsize)?;
             }
         } else {
             output.extend_from_slice(&buf);

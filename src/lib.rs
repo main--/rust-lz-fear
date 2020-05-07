@@ -12,7 +12,7 @@ pub use framed::LZ4FrameReader;
 mod tests {
     use std::str;
     use crate::raw::compress2;
-    use crate::raw::decompress_raw_block as decompress;
+    use crate::raw::test::decompress;
 
     fn compress(input: &[u8]) -> Vec<u8> {
         let mut buf = Vec::new();

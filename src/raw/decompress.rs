@@ -1,13 +1,15 @@
 use byteorder::{ReadBytesExt, LE};
 use std::io::{self, Cursor, Read, ErrorKind};
 use thiserror::Error;
-use fehler::{throws};
+use fehler::{throws, throw};
 
 /// Errors when decoding a raw LZ4 block.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Error)]
 pub enum DecodeError {
     #[error("Block stream ended prematurely. Either your input was truncated or you're trying to decompress garbage.")]
     UnexpectedEnd,
+    #[error("Refusing to decode a repetition that would exceed the memory limit. If you're using framed mode, this is either garbage input or an OOM attack. If you're using raw mode, good luck figuring out whether this input is valid or not.")]
+    MemoryLimitExceeded,
     #[error("The offset for a deduplication is zero. This is always invalid. You are probably decoding corrupted input.")]
     ZeroDeduplicationOffset,
     #[error("The offset for a deduplication is out of bounds. This may be caused by a missing or incomplete dictionary.")]
@@ -49,8 +51,12 @@ fn read_lsic(initial: u8, cursor: &mut Cursor<&[u8]>) -> usize {
 ///
 /// This function is based around memory buffers because that's what LZ4 intends.
 /// If your blocks don't fit in your memory, you should use smaller blocks.
+///
+/// `output_limit` specifies a soft upper limit for the size of `output` (including
+/// the data you passed on input). Note that this is only a measure to protect from
+/// DoS attacks and in the worst case, we may exceed it by up to `input.len()` bytes.
 #[throws]
-pub fn decompress_raw(input: &[u8], prefix: &[u8], output: &mut Vec<u8>) {
+pub fn decompress_raw(input: &[u8], prefix: &[u8], output: &mut Vec<u8>, output_limit: usize) {
     let mut reader = Cursor::new(input);
     while let Ok(token) = reader.read_u8() {
         // read literals
@@ -63,6 +69,9 @@ pub fn decompress_raw(input: &[u8], prefix: &[u8], output: &mut Vec<u8>) {
         // read duplicates
         if let Ok(offset) = reader.read_u16::<LE>() {
             let match_len = 4 + read_lsic(token & 0xf, &mut reader)?;
+            if (output.len() + match_len) > output_limit {
+                throw!(Error::MemoryLimitExceeded);
+            }
             copy_overlapping(offset.into(), match_len, prefix, output)?;
         }
     }
@@ -128,17 +137,18 @@ fn copy_overlapping(offset: usize, match_len: usize, prefix: &[u8], output: &mut
     Ok(())
 }
 
-/// Convenience wrapper around `decompress_raw` that simply allocates a vector for you and returns it.
-#[throws]
-pub fn decompress_raw_block(input: &[u8]) -> Vec<u8> {
-    let mut vec = Vec::new();
-    decompress_raw(input, &[], &mut vec)?;
-    vec
-}
 
 #[cfg(test)]
-mod test {
-    use super::decompress_raw_block as decompress;
+pub mod test {
+    use fehler::throws;
+    use super::{decompress_raw, Error};
+
+    #[throws]
+    pub fn decompress(input: &[u8]) -> Vec<u8> {
+        let mut vec = Vec::new();
+        decompress_raw(input, &[], &mut vec, std::usize::MAX)?;
+        vec
+    }
 
     #[test]
     fn aaaaaaaaaaa_lots_of_aaaaaaaaa() {
