@@ -214,7 +214,7 @@ impl<R: Read> LZ4FrameReader<R> {
                     let available_bytes = window.len() + outlen;
                     if let Some(surplus_bytes) = available_bytes.checked_sub(WINDOW_SIZE) {
                         // remove as many bytes from front as we are replacing
-                        window.drain(..outlen);
+                        window.drain(..surplus_bytes);
                     }
                     window.extend_from_slice(&output);
                 } else {
