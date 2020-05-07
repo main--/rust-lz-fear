@@ -188,6 +188,10 @@ impl<R: Read> LZ4FrameReader<R> {
         let is_compressed = block_length & INCOMPRESSIBLE == 0;
         let block_length = block_length & !INCOMPRESSIBLE;
 
+        if block_length > self.block_maxsize as u32 {
+            throw!(Error::BlockSizeOverflow);
+        }
+
         let buf = &mut self.read_buf;
         buf.resize(block_length.try_into().or(Err(Error::BlockLengthOverflow))?, 0);
         reader.read_exact(buf.as_mut_slice())?;
