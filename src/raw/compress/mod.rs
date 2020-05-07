@@ -72,7 +72,7 @@ impl EncoderTable for U32Table {
     fn offset(&mut self, offset: usize) {
         self.offset += offset;
     }
-    fn payload_size_limit() -> usize { u32::MAX as usize }
+    fn payload_size_limit() -> usize { std::u32::MAX as usize }
 }
 
 #[derive(Clone)]
@@ -97,7 +97,7 @@ impl EncoderTable for U16Table {
     fn offset(&mut self, offset: usize) {
         self.offset += offset;
     }
-    fn payload_size_limit() -> usize { u16::MAX as usize }
+    fn payload_size_limit() -> usize { std::u16::MAX as usize }
 }
 
 
@@ -249,7 +249,7 @@ fn write_lsic_tail<W: Write>(writer: &mut W, mut value: usize) {
     value -= 0xF;
 
     while value >= 4 * 0xFF {
-        writer.write_u32::<NativeEndian>(u32::MAX)?;
+        writer.write_u32::<NativeEndian>(std::u32::MAX)?;
         value -= 4 * 0xFF;
     }
     while value >= 0xFF {
