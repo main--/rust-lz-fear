@@ -3,7 +3,7 @@
 pub mod raw;
 pub mod framed;
 
-pub use framed::LZ4FrameReader;
+pub use framed::{LZ4FrameReader, CompressionSettings};
 
 
 

@@ -28,6 +28,11 @@ impl From<Error> for io::Error {
     }
 }
 
+/// A builder-style struct that configures compression settings.
+/// This is how you compress LZ4 frames.
+/// (An LZ4 file usually consists of a single frame.)
+///
+/// Create it using `Default::default()`.
 pub struct CompressionSettings<'a> {
     independent_blocks: bool,
     block_checksums: bool,
@@ -49,24 +54,62 @@ impl<'a> Default for CompressionSettings<'a> {
     }
 }
 impl<'a> CompressionSettings<'a> {
+    /// In independent mode, blocks are not allowed to reference data from previous blocks.
+    /// Hence, using dependent blocks yields slightly better compression.
+    /// The downside of dependent blocks is that seeking becomes impossible - the entire frame always has
+    /// to be decompressed from the beginning.
+    ///
+    /// Blocks are independent by default.
     pub fn independent_blocks(&mut self, v: bool) -> &mut Self {
         self.independent_blocks = v;
         self
     }
+
+    /// Block checksums can help detect data corruption in storage and transit.
+    /// They do not offer error correction though.
+    ///
+    /// In most cases, block checksums are not very helpful because you generally want a lower
+    /// layer to deal with data corruption more comprehensively.
+    ///
+    /// Block checksums are disabled by default.
     pub fn block_checksums(&mut self, v: bool) -> &mut Self {
         self.block_checksums = v;
         self
     }
+
+    /// The content checksum (also called frame checksum) is calculated over the contents of the entire frame.
+    /// This makes them cheaper than block checksums as their size overhead is constant
+    /// as well as marginally more useful, because they can help protect against incorrect decompression.
+    ///
+    /// Note that the content checksum can only be verified *after* the entire frame has been read
+    /// (and returned!), which is the downside of content checksums.
+    ///
+    /// Frame checksums are enabled by default.
     pub fn content_checksum(&mut self, v: bool) -> &mut Self {
         self.content_checksum = v;
         self
     }
-    /// Only valid values are 4MB, 1MB, 256KB, 64KB
+
+    /// Only valid values are 4MiB, 1MiB, 256KiB, 64KiB
     /// (TODO: better interface for this)
+    ///
+    /// The default block size is 4 MiB.
     pub fn block_size(&mut self, v: usize) -> &mut Self {
         self.block_size = v;
         self
     }
+
+    /// A dictionary is essentially a constant slice of bytes shared by the compressing and decompressing party.
+    /// Using a dictionary can improve compression ratios, because the compressor can reference data from the dictionary.
+    ///
+    /// The dictionary id is an application-specific identifier which can be used during decompression to determine
+    /// which dictionary to use.
+    ///
+    /// Note that while the size of a dictionary can be arbitrary, dictionaries larger than 64 KiB are not useful as
+    /// the LZ4 algorithm does not support backreferences by more than 64 KiB, i.e. any dictionary content before
+    /// the trailing 64 KiB is silently ignored.
+    ///
+    /// By default, no dictionary is used and no id is specified.
     pub fn dictionary(&mut self, id: u32, dict: &'a [u8]) -> &mut Self {
         self.dictionary_id = Some(id);
         self.dictionary = Some(dict);
@@ -88,6 +131,8 @@ impl<'a> CompressionSettings<'a> {
         self.dictionary_id = id;
         self
     }
+
+    // TODO: these interfaces need to go away in favor of something that can handle individual blocks rather than always compressing full frames at once
 
     #[throws]
     pub fn compress<R: Read, W: Write>(&self, reader: R, writer: W) {

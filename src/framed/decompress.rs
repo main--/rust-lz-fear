@@ -43,12 +43,13 @@ impl From<Error> for io::Error {
 }
 
 /// Wrapper around `LZ4FrameReader` that implements `Read` and `BufRead`.
-pub struct LZ4FrameIoReader<R: Read> {
+pub struct LZ4FrameIoReader<'a, R: Read> {
     frame_reader: LZ4FrameReader<R>,
     bytes_taken: usize,
     buffer: Vec<u8>,
+    dictionary: &'a [u8],
 }
-impl<R: Read> Read for LZ4FrameIoReader<R> {
+impl<R: Read> Read for LZ4FrameIoReader<'_, R> {
     #[throws(io::Error)]
     fn read(&mut self, buf: &mut [u8]) -> usize {
         let mybuf = self.fill_buf()?;
@@ -58,12 +59,12 @@ impl<R: Read> Read for LZ4FrameIoReader<R> {
         bytes_to_take
     }
 }
-impl<R: Read> BufRead for LZ4FrameIoReader<R> {
+impl<R: Read> BufRead for LZ4FrameIoReader<'_, R> {
     #[throws(io::Error)]
     fn fill_buf(&mut self) -> &[u8] {
         if self.bytes_taken == self.buffer.len() {
             self.buffer.clear();
-            self.frame_reader.decode_block(&mut self.buffer)?;
+            self.frame_reader.decode_block(&mut self.buffer, self.dictionary)?;
             self.bytes_taken = 0;
         }
         &self.buffer[self.bytes_taken..]
@@ -91,6 +92,12 @@ pub struct LZ4FrameReader<R: Read> {
 }
 
 impl<R: Read> LZ4FrameReader<R> {
+    /// Create a new LZ4FrameReader over an underlying reader and parse the header.
+    ///
+    /// A typical LZ4 file consists of exactly one frame.
+    /// This reader will stop reading at the end of the frame.
+    /// If you want to read any data following this frame, you should probably
+    /// pass in your reader by reference, rather than by value.
     #[throws]
     pub fn new(mut reader: R) -> Self {
         let magic = reader.read_u32::<LE>()?;
@@ -153,20 +160,42 @@ impl<R: Read> LZ4FrameReader<R> {
         }
     }
 
+    /// Returns the maximum number of bytes a block can decompress to (as specified by the file header).
+    ///
+    /// In general, all blocks in a frame except for the final one will have exactly this size.
+    /// (Although this is not strictly enforced and may be violated by hand-crafted inputs)
     pub fn block_size(&self) -> usize { self.block_maxsize }
+    /// Returns the number of bytes that this entire frame is supposed to decompress to.
+    /// This value is read directly from the file header and may be incorrect for malicious inputs.
     pub fn frame_size(&self) -> Option<u64> { self.content_size }
+    /// Return an identifier for the dictionary that was used to compress this frame.
+    ///
+    /// Dictionary identifiers are always application-specific. Note that the lz4 command line utility never
+    /// specifies a dictionary id, even if a dictionary was used.
     pub fn dictionary_id(&self) -> Option<u32> { self.dictionary_id }
-    
-    pub fn into_read(self) -> LZ4FrameIoReader<R> {
+
+    /// Convert this `LZ4FrameReader` into something that implements `std::io::BufRead`.
+    ///
+    /// Note that `io::copy` has a small performance issue: https://github.com/rust-lang/rust/issues/49921
+    pub fn into_read_with_dictionary(self, dictionary: &[u8]) -> LZ4FrameIoReader<R> {
         LZ4FrameIoReader {
             buffer: Vec::with_capacity(self.block_size()),
             bytes_taken: 0,
             frame_reader: self,
+            dictionary,
         }
     }
 
+    /// Convenience wrapper in case you don't want to specify a dictionary.
+    pub fn into_read(self) -> LZ4FrameIoReader<'static, R> {
+        self.into_read_with_dictionary(&[])
+    }
+
+    /// Decode a single block.
+    ///
+    /// The `output` buffer must be empty upon calling this method.
     #[throws]
-    pub fn decode_block(&mut self, output: &mut Vec<u8>) {
+    pub fn decode_block(&mut self, output: &mut Vec<u8>, dictionary: &[u8]) {
         assert!(output.is_empty(), "You must pass an empty buffer to this interface.");
         
         if self.finished { return; }
@@ -207,6 +236,10 @@ impl<R: Read> LZ4FrameReader<R> {
 
         if is_compressed {
             if let Some(window) = self.carryover_window.as_mut() {
+                if window.is_empty() {
+                    window.extend_from_slice(dictionary);
+                }
+
                 raw::decompress_raw(&buf, &window, output, self.block_maxsize)?;
 
                 let outlen = output.len();
@@ -224,7 +257,7 @@ impl<R: Read> LZ4FrameReader<R> {
 
                 assert!(window.len() <= WINDOW_SIZE);
             } else {
-                raw::decompress_raw(&buf, &[], output, self.block_maxsize)?;
+                raw::decompress_raw(&buf, dictionary, output, self.block_maxsize)?;
             }
         } else {
             output.extend_from_slice(&buf);
