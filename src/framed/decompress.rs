@@ -9,7 +9,7 @@ use fehler::{throw, throws};
 
 use super::{MAGIC, INCOMPRESSIBLE, WINDOW_SIZE};
 use super::header::{self, Flags, BlockDescriptor};
-use crate::raw::decompress as raw;
+use crate::raw;
 
 
 /// Errors when decompressing an LZ4 frame.

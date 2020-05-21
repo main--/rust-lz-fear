@@ -8,7 +8,7 @@ use fehler::{throws};
 
 use super::{MAGIC, INCOMPRESSIBLE, WINDOW_SIZE};
 use super::header::{Flags, BlockDescriptor};
-use crate::raw::compress::{U32Table, compress2, EncoderTable};
+use crate::raw::{U32Table, compress2, EncoderTable};
 
 
 /// Errors when compressing an LZ4 frame.

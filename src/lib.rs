@@ -1,4 +1,11 @@
 #![forbid(unsafe_code)]
+//! A fast pure-rust no-unsafe implementation of LZ4 compression and decompression.
+//!
+//! Hey you! Yes you! Are you unhappy with these docs?
+//! Would you like to see more examples?
+//! Or maybe a more ergonomic API?
+//! That's awesome! I'm looking forward to merging your pull request!
+
 
 pub mod raw;
 pub mod framed;
