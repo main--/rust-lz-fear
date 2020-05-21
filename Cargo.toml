@@ -1,6 +1,6 @@
 [package]
 name = "lz-fear"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["main() <main@ehvag.de>"]
 edition = "2018"
 
