@@ -1,7 +1,5 @@
 use lz_fear::framed::CompressionSettings;
 use std::env;
-use std::path::Path;
-use std::ffi::OsStr;
 use std::io::Write;
 use std::process::Command;
 use tempfile::NamedTempFile;
