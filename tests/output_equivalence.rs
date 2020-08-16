@@ -83,10 +83,12 @@ fn run_test() {
         let input = std::fs::File::open(env::current_exe().unwrap()).unwrap(); //std::io::Cursor::new(&[1,3,3,7]);
         let mut output = Vec::new();
         if bits & 16 != 0 {
-            settings.compress_with_size(input, &mut output);
+            settings.compress_with_size(input, &mut output)
+                .expect("CompressionSettings::compress_with_size failed");
             args.push("--content-size");
         } else {
-            settings.compress(input, &mut output);
+            settings.compress(input, &mut output)
+                .expect("CompressionSettings::compress failed");
         }
         
         let reference_output = run_cmd(&args);
