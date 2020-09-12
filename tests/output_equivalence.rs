@@ -1,8 +1,8 @@
 use lz_fear::framed::CompressionSettings;
 use std::env;
-use std::path::Path;
-use std::ffi::OsStr;
+use std::io::Write;
 use std::process::Command;
+use tempfile::NamedTempFile;
 
 fn run_cmd(flags: &[&str]) -> Vec<u8> {
     let me = env::current_exe().unwrap();
@@ -46,6 +46,15 @@ static DICT_DATA: &'static [u8] = &[1,3,3,7];
 #[test]
 fn run_test() {
     let mut failed_runs = Vec::new();
+
+    let dict_data = DICT_DATA;
+    let dict_data_file = {
+        let mut f = NamedTempFile::new().expect("Error creating temporary file");
+        f.write_all(dict_data).expect("Error writing DICT_DATA");
+        f
+    };
+    let dict_data_path = dict_data_file.path().to_str().unwrap();
+
     for bits in 0..(1 << 5) {
         let mut settings = CompressionSettings::default();
         let mut args = Vec::new();
@@ -67,17 +76,19 @@ fn run_test() {
         }
 
         if bits & 8 != 0 {
-            settings.dictionary(0, /*DICT_DATA*/include_bytes!("/usr/bin/cargo")).dictionary_id_nonsense_override(None);
-            args.extend("-D /usr/bin/cargo".split(' '));
+            settings.dictionary(0, dict_data).dictionary_id_nonsense_override(None);
+            args.extend(&["-D", dict_data_path]);
         }
 
         let input = std::fs::File::open(env::current_exe().unwrap()).unwrap(); //std::io::Cursor::new(&[1,3,3,7]);
         let mut output = Vec::new();
         if bits & 16 != 0 {
-            settings.compress_with_size(input, &mut output);
+            settings.compress_with_size(input, &mut output)
+                .expect("CompressionSettings::compress_with_size failed");
             args.push("--content-size");
         } else {
-            settings.compress(input, &mut output);
+            settings.compress(input, &mut output)
+                .expect("CompressionSettings::compress failed");
         }
         
         let reference_output = run_cmd(&args);
