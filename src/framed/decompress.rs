@@ -234,34 +234,40 @@ impl<R: Read> LZ4FrameReader<R> {
             }
         }
 
-        if is_compressed {
-            if let Some(window) = self.carryover_window.as_mut() {
-                if window.is_empty() {
-                    window.extend_from_slice(dictionary);
-                }
-
-                raw::decompress_raw(&buf, &window, output, self.block_maxsize)?;
-
-                let outlen = output.len();
-                if outlen < WINDOW_SIZE {
-                    let available_bytes = window.len() + outlen;
-                    if let Some(surplus_bytes) = available_bytes.checked_sub(WINDOW_SIZE) {
-                        // remove as many bytes from front as we are replacing
-                        window.drain(..surplus_bytes);
-                    }
-                    window.extend_from_slice(&output);
-                } else {
-                    window.clear();
-                    window.extend_from_slice(&output[outlen - WINDOW_SIZE..]);
-                }
-
-                assert!(window.len() <= WINDOW_SIZE);
-            } else {
-                raw::decompress_raw(&buf, dictionary, output, self.block_maxsize)?;
+        // set up the prefix properly
+        let dec_prefix = if let Some(window) = self.carryover_window.as_mut() {
+            if window.is_empty() {
+                window.extend_from_slice(dictionary);
             }
+            window
+        } else {
+            dictionary
+        };
+        // decompress or copy, depending on whether this block is compressed
+        if is_compressed {
+            raw::decompress_raw(&buf, dec_prefix, output, self.block_maxsize)?;
         } else {
             output.extend_from_slice(&buf);
         }
+        // finally, push data back into the window as needed
+        if let Some(window) = self.carryover_window.as_mut() {
+            let outlen = output.len();
+            if outlen < WINDOW_SIZE {
+                let available_bytes = window.len() + outlen;
+                if let Some(surplus_bytes) = available_bytes.checked_sub(WINDOW_SIZE) {
+                    // remove as many bytes from front as we are replacing
+                    window.drain(..surplus_bytes);
+                }
+                window.extend_from_slice(&output);
+            } else {
+                // TODO: optimize this case to avoid the copy
+                window.clear();
+                window.extend_from_slice(&output[outlen - WINDOW_SIZE..]);
+            }
+
+            assert!(window.len() <= WINDOW_SIZE);
+        }
+
 
         if output.len() > self.block_maxsize {
             throw!(Error::BlockSizeOverflow);
