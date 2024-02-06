@@ -2,7 +2,7 @@
 
 use std::fmt::Debug;
 use thiserror::Error;
-use fehler::{throw, throws};
+use culpa::{throw, throws};
 use bitflags::bitflags;
 
 bitflags! {

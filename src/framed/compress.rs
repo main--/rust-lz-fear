@@ -4,7 +4,7 @@ use std::io::{self, Read, Write, Seek, SeekFrom, ErrorKind};
 use std::mem;
 use twox_hash::XxHash32;
 use thiserror::Error;
-use fehler::{throws};
+use culpa::{throws};
 
 use super::{MAGIC, INCOMPRESSIBLE, WINDOW_SIZE};
 use super::header::{Flags, BlockDescriptor};

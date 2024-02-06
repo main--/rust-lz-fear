@@ -5,7 +5,7 @@ use std::cmp;
 use std::convert::TryInto;
 use twox_hash::XxHash32;
 use thiserror::Error;
-use fehler::{throw, throws};
+use culpa::{throw, throws};
 
 use super::{MAGIC, INCOMPRESSIBLE, WINDOW_SIZE};
 use super::header::{self, Flags, BlockDescriptor};
@@ -54,7 +54,7 @@ impl<R: Read> Read for LZ4FrameIoReader<'_, R> {
     fn read(&mut self, buf: &mut [u8]) -> usize {
         let mybuf = self.fill_buf()?;
         let bytes_to_take = cmp::min(mybuf.len(), buf.len());
-        &mut buf[..bytes_to_take].copy_from_slice(&mybuf[..bytes_to_take]);
+        (&mut buf[..bytes_to_take]).copy_from_slice(&mybuf[..bytes_to_take]);
         self.consume(bytes_to_take);
         bytes_to_take
     }

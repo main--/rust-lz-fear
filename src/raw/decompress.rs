@@ -1,7 +1,7 @@
 use byteorder::{ReadBytesExt, LE};
 use std::io::{self, Cursor, Read, ErrorKind};
 use thiserror::Error;
-use fehler::{throws, throw};
+use culpa::{throws, throw};
 
 /// Errors when decoding a raw LZ4 block.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Error)]
