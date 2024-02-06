@@ -1,8 +1,8 @@
 [package]
 name = "lz-fear"
-version = "0.1.2"
+version = "0.2.0"
 authors = ["main() <main@ehvag.de>"]
-edition = "2018"
+edition = "2021"
 
 description = "A fast pure-rust no-unsafe implementation of LZ4 compression and decompression"
 keywords = ["compression", "lz4", "compress", "decompression", "decompress"]
