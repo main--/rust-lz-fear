@@ -140,7 +140,7 @@ fn copy_overlapping(offset: usize, match_len: usize, prefix: &[u8], output: &mut
 
 #[cfg(test)]
 pub mod test {
-    use fehler::throws;
+    use culpa::throws;
     use super::{decompress_raw, Error};
 
     #[throws]

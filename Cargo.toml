@@ -20,9 +20,9 @@ culpa = "1.0"
 bitflags = "2.4.2"
 
 [dev-dependencies]
-criterion = "0.3"
-rand = "0.7.3"
-tempfile = "3.1.0"
+criterion = "0.5"
+rand = "0.8.5"
+tempfile = "3.10.0"
 
 [[bench]]
 name = "my_benchmark"

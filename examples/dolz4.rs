@@ -1,7 +1,7 @@
 use lz_fear::framed::CompressionSettings;
 use std::fs::File;
 use std::{io, env};
-use fehler::throws;
+use culpa::throws;
 
 #[throws(io::Error)]
 fn main() {
