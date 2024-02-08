@@ -1,7 +1,7 @@
 use byteorder::{ReadBytesExt, LE};
 use std::io::{self, Cursor, Read, ErrorKind};
 use thiserror::Error;
-use fehler::{throws, throw};
+use culpa::{throws, throw};
 
 /// Errors when decoding a raw LZ4 block.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Error)]
@@ -140,7 +140,7 @@ fn copy_overlapping(offset: usize, match_len: usize, prefix: &[u8], output: &mut
 
 #[cfg(test)]
 pub mod test {
-    use fehler::throws;
+    use culpa::throws;
     use super::{decompress_raw, Error};
 
     #[throws]

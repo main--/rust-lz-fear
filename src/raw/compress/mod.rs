@@ -3,7 +3,7 @@ use std::cmp;
 use std::io::Write;
 use std::convert::{TryInto, TryFrom};
 use byteorder::{ByteOrder, NativeEndian, WriteBytesExt, LE};
-use fehler::{throws};
+use culpa::{throws};
 
 type Error = std::io::Error;
 

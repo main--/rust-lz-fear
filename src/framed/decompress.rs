@@ -5,7 +5,7 @@ use std::cmp;
 use std::convert::TryInto;
 use twox_hash::XxHash32;
 use thiserror::Error;
-use fehler::{throw, throws};
+use culpa::{throw, throws};
 
 use super::{MAGIC, INCOMPRESSIBLE, WINDOW_SIZE};
 use super::header::{self, Flags, BlockDescriptor};
@@ -54,7 +54,7 @@ impl<R: Read> Read for LZ4FrameIoReader<'_, R> {
     fn read(&mut self, buf: &mut [u8]) -> usize {
         let mybuf = self.fill_buf()?;
         let bytes_to_take = cmp::min(mybuf.len(), buf.len());
-        &mut buf[..bytes_to_take].copy_from_slice(&mybuf[..bytes_to_take]);
+        buf[..bytes_to_take].copy_from_slice(&mybuf[..bytes_to_take]);
         self.consume(bytes_to_take);
         bytes_to_take
     }
@@ -228,7 +228,7 @@ impl<R: Read> LZ4FrameReader<R> {
         if self.flags.block_checksums() {
             let checksum = reader.read_u32::<LE>()?;
             let mut hasher = XxHash32::with_seed(0);
-            hasher.write(&buf);
+            hasher.write(buf);
             if hasher.finish() != checksum.into() {
                 throw!(Error::BlockChecksumFail);
             }
@@ -245,9 +245,9 @@ impl<R: Read> LZ4FrameReader<R> {
         };
         // decompress or copy, depending on whether this block is compressed
         if is_compressed {
-            raw::decompress_raw(&buf, dec_prefix, output, self.block_maxsize)?;
+            raw::decompress_raw(buf, dec_prefix, output, self.block_maxsize)?;
         } else {
-            output.extend_from_slice(&buf);
+            output.extend_from_slice(buf);
         }
         // finally, push data back into the window as needed
         if let Some(window) = self.carryover_window.as_mut() {
@@ -258,7 +258,7 @@ impl<R: Read> LZ4FrameReader<R> {
                     // remove as many bytes from front as we are replacing
                     window.drain(..surplus_bytes);
                 }
-                window.extend_from_slice(&output);
+                window.extend_from_slice(output);
             } else {
                 // TODO: optimize this case to avoid the copy
                 window.clear();
@@ -274,7 +274,7 @@ impl<R: Read> LZ4FrameReader<R> {
         }
 
         if let Some(hasher) = self.content_hasher.as_mut() {
-            hasher.write(&output);
+            hasher.write(output);
         }
     }
 }

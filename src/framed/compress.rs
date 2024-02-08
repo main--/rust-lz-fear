@@ -4,7 +4,7 @@ use std::io::{self, Read, Write, Seek, SeekFrom, ErrorKind};
 use std::mem;
 use twox_hash::XxHash32;
 use thiserror::Error;
-use fehler::{throws};
+use culpa::{throws};
 
 use super::{MAGIC, INCOMPRESSIBLE, WINDOW_SIZE};
 use super::header::{Flags, BlockDescriptor};
@@ -148,7 +148,7 @@ impl<'a> CompressionSettings<'a> {
     pub fn compress_with_size<R: Read + Seek, W: Write>(&self, mut reader: R, writer: W) {
         // maybe one day we can just use reader.stream_len() here: https://github.com/rust-lang/rust/issues/59359
         // then again, we implement this to ignore the all bytes before the cursor which stream_len() does not
-        let start = reader.seek(SeekFrom::Current(0))?;
+        let start = reader.stream_position()?;
         let end = reader.seek(SeekFrom::End(0))?;
         reader.seek(SeekFrom::Start(start))?;
 
@@ -268,12 +268,10 @@ impl<'a> CompressionSettings<'a> {
                 in_buffer.extend_from_slice(block_initializer);
 
                 table = template_table.clone();
-            } else {
-                if in_buffer.len() > WINDOW_SIZE {
-                    let how_much_to_forget = in_buffer.len() - WINDOW_SIZE;
-                    table.offset(how_much_to_forget);
-                    in_buffer.drain(..how_much_to_forget);
-                }
+            } else if in_buffer.len() > WINDOW_SIZE {
+                let how_much_to_forget = in_buffer.len() - WINDOW_SIZE;
+                table.offset(how_much_to_forget);
+                in_buffer.drain(..how_much_to_forget);
             }
         }
         writer.write_u32::<LE>(0)?;
@@ -303,7 +301,7 @@ impl<'a> Write for NoPartialWrites<'a> {
         }
 
         let amt = data.len();
-        let (a, b) = mem::replace(&mut self.0, &mut []).split_at_mut(data.len());
+        let (a, b) = mem::take(&mut self.0).split_at_mut(data.len());
         a.copy_from_slice(data);
         self.0 = b;
         Ok(amt)
